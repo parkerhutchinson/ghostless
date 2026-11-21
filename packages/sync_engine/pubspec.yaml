@@ -1,0 +1,17 @@
+name: sync_engine
+description: Database-agnostic sync engine with adapters for Postgres, MySQL, Sanity and Contentful.
+version: 0.1.0
+
+environment:
+  sdk: ^3.14.0
+
+# Add regular dependencies here.
+dependencies:
+  http: ^1.6.0
+  mysql1: ^0.23.0
+  postgres: ^3.6.0
+  sqlite3: ^3.9.1
+
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.33.0
