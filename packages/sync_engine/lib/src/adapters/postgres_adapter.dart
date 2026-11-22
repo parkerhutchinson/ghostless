@@ -2,11 +2,12 @@ import 'package:postgres/postgres.dart';
 
 import '../core/adapter.dart';
 import '../core/change.dart';
+import '../core/schema.dart';
 import 'sql.dart';
 
 /// Syncs Postgres tables. Collection names are table names (`schema.table`
 /// works too); see [SqlTable] for what each table needs.
-class PostgresAdapter implements SyncAdapter {
+class PostgresAdapter implements SyncAdapter, SchemaInspector {
   PostgresAdapter({
     required this.endpoint,
     this.settings,
@@ -63,6 +64,25 @@ class PostgresAdapter implements SyncAdapter {
       cursor: changes.isEmpty ? null : SqlDialect.encodeCursor(changes.last),
       hasMore: changes.length == limit,
     );
+  }
+
+  @override
+  bool get hasSchema => true;
+
+  @override
+  Future<CollectionSchema?> describe(String collection) async {
+    final stmt = _dialect.describe(collection);
+    final result = await _conn.execute(stmt.sql, parameters: stmt.params);
+    return _dialect.schemaFrom([
+      for (final row in result) row.toColumnMap(),
+    ], _table(collection));
+  }
+
+  @override
+  Future<bool?> canWrite(String collection) async {
+    final stmt = _dialect.writePrivileges(collection);
+    final result = await _conn.execute(stmt.sql, parameters: stmt.params);
+    return result.first.toColumnMap()['ok'] == true;
   }
 
   /// Applies the batch in one transaction.

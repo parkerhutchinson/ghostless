@@ -3,34 +3,47 @@ import 'package:sync_engine/sync_engine.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import 'app_theme.dart';
+import 'sync/sync_service.dart';
 
 /// Small title-bar icon showing whether local data has reached the
 /// server; hover it for the details.
 class SyncStatusIndicator extends StatelessWidget {
   const SyncStatusIndicator({super.key, required this.sync});
 
-  /// Null when the app runs local-only.
-  final SyncController? sync;
+  /// The connection picked in Settings; local-only without one.
+  final SyncService sync;
 
   @override
-  Widget build(BuildContext context) {
-    final sync = this.sync;
-    if (sync == null) return const _Status(Symbols.cloud_off, 'Local only');
+  Widget build(BuildContext context) => StreamBuilder<SyncConnection?>(
+    stream: sync.watch(),
+    initialData: sync.current,
+    builder: (context, snap) => switch (snap.data) {
+      null => const _Status(Symbols.cloud_off, 'Local only'),
+      final c => _connected(c.controller, c.config.kind.label),
+    },
+  );
+
+  Widget _connected(SyncController sync, String name) {
     return StreamBuilder<SyncStatus>(
+      // Keyed so a new connection gets a fresh subscription.
+      key: ObjectKey(sync),
       stream: sync.statusStream,
       initialData: sync.status,
       builder: (context, snapshot) {
         final s = snapshot.requireData;
         final pending = s.pending > 0 ? ' · ${s.pending} pending' : '';
         return switch (s.phase) {
-          SyncPhase.syncing => _Status(Symbols.sync, 'Syncing…$pending'),
+          SyncPhase.syncing => _Status(
+            Symbols.sync,
+            'Syncing with $name…$pending',
+          ),
           SyncPhase.offline => _Status(
             Symbols.cloud_off,
-            'Offline$pending\n${s.lastError}',
+            'Can’t reach $name$pending\n${s.lastError}',
           ),
           SyncPhase.idle => _Status(
             pending.isEmpty ? Symbols.cloud_done : Symbols.cloud_upload,
-            pending.isEmpty ? 'Synced' : 'Waiting$pending',
+            pending.isEmpty ? 'Synced with $name' : 'Waiting$pending',
           ),
         };
       },

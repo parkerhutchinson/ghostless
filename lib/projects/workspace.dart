@@ -5,6 +5,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../activity/activity.dart';
 import '../activity/activity_page.dart';
 import '../activity/activity_repository.dart';
+import '../sync/sync_service.dart';
 import '../tasks/task.dart';
 import '../tasks/task_repository.dart';
 import '../layout.dart';
@@ -31,7 +32,11 @@ class Workspace extends StatefulWidget {
     required this.settings,
     required this.profiles,
     required this.activity,
+    this.sync,
   });
+
+  /// The database connection, set up in Settings.
+  final SyncService? sync;
 
   /// What others did to the current profile's tasks: the Activity view.
   final ActivityRepository activity;
@@ -254,8 +259,11 @@ class _WorkspaceState extends State<Workspace> {
                 onRename: _rename,
                 onDelete: _delete,
                 onDropTask: _addTask,
-                onOpenSettings: () =>
-                    showSettingsDialog(context, widget.settings),
+                onOpenSettings: () => showSettingsDialog(
+                  context,
+                  widget.settings,
+                  sync: widget.sync,
+                ),
               ),
             ),
           ),

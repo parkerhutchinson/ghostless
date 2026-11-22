@@ -18,5 +18,6 @@ export 'src/core/engine.dart';
 export 'src/core/json.dart' show fingerprint;
 export 'src/core/pipeline.dart';
 export 'src/core/report.dart';
+export 'src/core/schema.dart';
 export 'src/local/local_store.dart';
 export 'src/local/sync_controller.dart';

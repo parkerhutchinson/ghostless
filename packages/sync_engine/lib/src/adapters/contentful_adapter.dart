@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import '../core/adapter.dart';
 import '../core/change.dart';
 import '../core/json.dart';
+import '../core/schema.dart';
 import 'http_util.dart';
 
 /// Syncs Contentful entries. Collection names are content type ids.
@@ -20,7 +21,7 @@ import 'http_util.dart';
 ///   filter by content type for entries, not deletions.
 /// - Pushes aren't atomic across a batch (the CMA has no transactions);
 ///   a failure part-way leaves earlier entries written. Re-sending is safe.
-class ContentfulAdapter implements SyncAdapter {
+class ContentfulAdapter implements SyncAdapter, SchemaInspector {
   ContentfulAdapter({
     required this.spaceId,
     this.environment = 'master',
@@ -141,6 +142,74 @@ class ContentfulAdapter implements SyncAdapter {
     for (final MapEntry(:key, :value) in fields.entries)
       if (value is Map && value.containsKey(locale)) key: value[locale],
   };
+
+  // ----------------------------------------------------------------- schema
+
+  @override
+  bool get hasSchema => true;
+
+  /// The content type's fields, read with the management token when there
+  /// is one (it sees unpublished content types too), else the delivery
+  /// token. Also checks that [locale] exists.
+  @override
+  Future<CollectionSchema?> describe(String collection) async {
+    final response = await _read('$_envPath/content_types/$collection');
+    if (response.statusCode == 404) return null;
+    final body = decodeOrThrow(name, response);
+    final locales = decodeOrThrow(name, await _read('$_envPath/locales'));
+    final codes = [
+      for (final l in (locales['items'] as List? ?? const []))
+        (l as Map)['code'],
+    ];
+    return CollectionSchema(
+      fields: {
+        for (final f in (body['fields'] as List? ?? const []).cast<Map>())
+          if (f['omitted'] != true && f['disabled'] != true)
+            f['id'] as String: FieldSchema(
+              _kindOf(f),
+              nullable: f['required'] != true,
+              nativeType: f['type'] == 'Array'
+                  ? 'Array of ${(f['items'] as Map?)?['type']}'
+                  : '${f['type']}',
+            ),
+      },
+      notes: [
+        if (!codes.contains(locale))
+          SchemaNote(
+            SchemaNoteLevel.error,
+            'The environment has no "$locale" locale.',
+          ),
+      ],
+    );
+  }
+
+  static FieldKind _kindOf(Map field) => switch (field['type']) {
+    'Symbol' || 'Text' => FieldKind.string,
+    'Integer' || 'Number' => FieldKind.number,
+    'Boolean' => FieldKind.boolean,
+    'Date' => FieldKind.timestamp,
+    'Object' => FieldKind.json,
+    'Array' when (field['items'] as Map?)?['type'] == 'Symbol' =>
+      FieldKind.stringList,
+    _ => FieldKind.other,
+  };
+
+  /// Writes need a management token that can see the content type.
+  @override
+  Future<bool?> canWrite(String collection) async {
+    if (managementToken == null) return false;
+    final response = await _send('GET', '$_envPath/content_types/$collection');
+    return response.statusCode < 400;
+  }
+
+  Future<http.Response> _read(String path) => managementToken != null
+      ? _send('GET', path)
+      : sendWithRetry(
+          _client,
+          () =>
+              http.Request('GET', _cda.replace(path: path))
+                ..headers['Authorization'] = 'Bearer $deliveryToken',
+        );
 
   // ----------------------------------------------------------------- writes
 

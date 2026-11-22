@@ -12,7 +12,9 @@ dependencies:
     sdk: flutter
   material_symbols_icons: ^4.2960.0
   material_ui: ^1.1.0
+  mysql1: ^0.23.0
   path_provider: ^2.1.6
+  postgres: ^3.6.0
   sync_engine:
     path: packages/sync_engine
   window_manager: ^0.7.0

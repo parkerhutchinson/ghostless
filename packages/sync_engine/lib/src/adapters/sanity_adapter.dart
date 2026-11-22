@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import '../core/adapter.dart';
 import '../core/change.dart';
 import '../core/json.dart';
+import '../core/schema.dart';
 import 'http_util.dart';
 
 /// Syncs Sanity documents. Collection names are document `_type`s.
@@ -16,7 +17,7 @@ import 'http_util.dart';
 ///   documents). Adding them needs Sanity's history API or a webhook.
 /// - Sanity sets `_updatedAt` itself, so a pushed record's timestamp becomes
 ///   the time of the write, not the source's.
-class SanityAdapter implements SyncAdapter {
+class SanityAdapter implements SyncAdapter, SchemaInspector {
   SanityAdapter({
     required this.projectId,
     required this.dataset,
@@ -151,6 +152,44 @@ class SanityAdapter implements SyncAdapter {
         ),
       );
     }
+  }
+
+  /// Sanity datasets have no schema the API can report.
+  @override
+  bool get hasSchema => false;
+
+  @override
+  Future<CollectionSchema?> describe(String collection) async => null;
+
+  /// Sends a dry-run mutation (nothing is written): Sanity checks the
+  /// token's permissions without applying it.
+  @override
+  Future<bool?> canWrite(String collection) async {
+    if (token == null) return false;
+    final uri = _base.replace(
+      path: '/$apiVersion/data/mutate/$dataset',
+      queryParameters: {'dryRun': 'true', 'returnIds': 'false'},
+    );
+    final response = await sendWithRetry(
+      _client,
+      () => http.Request('POST', uri)
+        ..headers.addAll(_headers)
+        ..body = encodeJson({
+          'mutations': [
+            {
+              'createOrReplace': {
+                '_id': 'sync-engine-write-check',
+                '_type': collection,
+              },
+            },
+          ],
+        }),
+    );
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      return false;
+    }
+    decodeOrThrow(name, response);
+    return true;
   }
 
   static (String, String) _decodeCursor(String? cursor) {

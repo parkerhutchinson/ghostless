@@ -2,6 +2,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../sync/sync_service.dart';
+import '../sync/sync_settings.dart';
 import 'background.dart';
 import 'settings_repository.dart';
 import '../app_theme.dart';
@@ -10,16 +12,20 @@ import 'color_picker.dart';
 /// The Settings modal. Changes apply right away.
 Future<void> showSettingsDialog(
   BuildContext context,
-  SettingsRepository settings,
-) => showDialog<void>(
+  SettingsRepository settings, {
+  SyncService? sync,
+}) => showDialog<void>(
   context: context,
   barrierColor: Colors.black54,
-  builder: (_) => _SettingsDialog(settings: settings),
+  builder: (_) => _SettingsDialog(settings: settings, sync: sync),
 );
 
 class _SettingsDialog extends StatelessWidget {
-  const _SettingsDialog({required this.settings});
+  const _SettingsDialog({required this.settings, this.sync});
   final SettingsRepository settings;
+
+  /// The Sync section; left out when null (tests).
+  final SyncService? sync;
 
   @override
   Widget build(BuildContext context) {
@@ -29,26 +35,35 @@ class _SettingsDialog extends StatelessWidget {
       title: const Text('Settings'),
       content: SizedBox(
         width: 440,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          spacing: 16,
-          children: [
-            StreamBuilder<Background>(
-              stream: settings.watchBackground(),
-              initialData: settings.background,
-              builder: (context, snap) => _BackgroundPicker(
-                settings: settings,
-                current: snap.requireData,
+        // Scrolls when the window is too short for every section.
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: 16,
+            children: [
+              StreamBuilder<Background>(
+                stream: settings.watchBackground(),
+                initialData: settings.background,
+                builder: (context, snap) => _BackgroundPicker(
+                  settings: settings,
+                  current: snap.requireData,
+                ),
               ),
-            ),
-            StreamBuilder<Color>(
-              stream: settings.watchAccent(),
-              initialData: settings.accent,
-              builder: (context, snap) =>
-                  _AccentPicker(settings: settings, current: snap.requireData),
-            ),
-          ],
+              StreamBuilder<Color>(
+                stream: settings.watchAccent(),
+                initialData: settings.accent,
+                builder: (context, snap) => _AccentPicker(
+                  settings: settings,
+                  current: snap.requireData,
+                ),
+              ),
+              if (sync case final sync?) ...[
+                Divider(height: 8, color: context.colors.cardBorder),
+                SyncSettingsSection(sync: sync),
+              ],
+            ],
+          ),
         ),
       ),
       actions: [

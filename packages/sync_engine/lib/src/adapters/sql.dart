@@ -1,4 +1,5 @@
 import '../core/change.dart';
+import '../core/schema.dart';
 
 /// How a SQL table maps onto sync records.
 ///
@@ -122,6 +123,75 @@ abstract base class SqlDialect {
     );
   }
 
+  /// The columns of [table] (`schema.table` allowed): name, type, whether
+  /// it's nullable and its default. No rows when the table doesn't exist.
+  SqlStatement describe(String table);
+
+  /// How a column of SQL type [dataType] (lowercase, as
+  /// `information_schema.columns.data_type` reports it) holds values.
+  FieldKind kindOf(String dataType);
+
+  /// Builds a [CollectionSchema] from [describe]'s rows (keys
+  /// `column_name`, `data_type`, `is_nullable`, `column_default`, any
+  /// case), checking [t]'s system columns. Null when there are no rows (no
+  /// such table).
+  CollectionSchema? schemaFrom(
+    Iterable<Map<String, Object?>> rows,
+    SqlTable t,
+  ) {
+    Object? value(Map<String, Object?> row, String key) =>
+        row[key] ?? row[key.toUpperCase()];
+    final columns = <String, FieldSchema>{};
+    for (final row in rows) {
+      final type = '${value(row, 'data_type')}'.toLowerCase();
+      columns['${value(row, 'column_name')}'] = FieldSchema(
+        kindOf(type),
+        nullable: '${value(row, 'is_nullable')}'.toUpperCase() == 'YES',
+        hasDefault: value(row, 'column_default') != null,
+        nativeType: type,
+      );
+    }
+    if (columns.isEmpty) return null;
+    final notes = <SchemaNote>[];
+    if (!columns.containsKey(t.idColumn)) {
+      notes.add(
+        SchemaNote(
+          SchemaNoteLevel.error,
+          'It has no "${t.idColumn}" column to hold record ids.',
+        ),
+      );
+    }
+    final updated = columns[t.updatedAtColumn];
+    if (updated == null) {
+      notes.add(
+        SchemaNote(
+          SchemaNoteLevel.error,
+          'It has no "${t.updatedAtColumn}" column, which sync uses to find '
+          'changes.',
+        ),
+      );
+    } else if (updated.kind != FieldKind.timestamp) {
+      notes.add(
+        SchemaNote(
+          SchemaNoteLevel.error,
+          '"${t.updatedAtColumn}" is ${updated.nativeType}; it needs to be a '
+          'timestamp.',
+        ),
+      );
+    }
+    if (t.deletedAtColumn case final d? when !columns.containsKey(d)) {
+      notes.add(SchemaNote(SchemaNoteLevel.error, 'It has no "$d" column.'));
+    }
+    return CollectionSchema(
+      fields: {
+        for (final MapEntry(:key, :value) in columns.entries)
+          if (!t._systemColumns.contains(key)) key: value,
+      },
+      notes: notes,
+      jsonInText: true,
+    );
+  }
+
   /// Cursor = timestamp and id of the last row returned.
   static String encodeCursor(Change last) =>
       '${last.updatedAt.toUtc().toIso8601String()}|${last.id}';
@@ -146,6 +216,48 @@ final class PostgresDialect extends SqlDialect {
 
   @override
   String placeholder(int index) => '\$${index + 1}';
+
+  @override
+  SqlStatement describe(String table) {
+    final dot = table.indexOf('.');
+    final schema = dot == -1 ? null : table.substring(0, dot);
+    final name = dot == -1 ? table : table.substring(dot + 1);
+    return (
+      sql:
+          'SELECT column_name, data_type, is_nullable, column_default '
+          'FROM information_schema.columns '
+          'WHERE table_schema = COALESCE(\$1, current_schema()) '
+          'AND table_name = \$2 ORDER BY ordinal_position',
+      params: [schema, name],
+    );
+  }
+
+  /// Whether the current user may insert, update and delete rows in
+  /// [table].
+  SqlStatement writePrivileges(String table) => (
+    sql:
+        "SELECT has_table_privilege(\$1, 'INSERT') "
+        "AND has_table_privilege(\$1, 'UPDATE') "
+        "AND has_table_privilege(\$1, 'DELETE') AS ok",
+    params: [quote(table)],
+  );
+
+  @override
+  FieldKind kindOf(String dataType) => switch (dataType) {
+    'text' || 'character varying' || 'character' || 'uuid' => FieldKind.string,
+    'smallint' ||
+    'integer' ||
+    'bigint' ||
+    'numeric' ||
+    'real' ||
+    'double precision' => FieldKind.number,
+    'boolean' => FieldKind.boolean,
+    'date' ||
+    'timestamp with time zone' ||
+    'timestamp without time zone' => FieldKind.timestamp,
+    'json' || 'jsonb' => FieldKind.json,
+    _ => FieldKind.other,
+  };
 
   @override
   String upsertClause(SqlTable t, List<String> columns) {

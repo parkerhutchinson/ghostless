@@ -374,7 +374,7 @@ packages:
     source: hosted
     version: "1.19.0"
   mysql1:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: mysql1
       sha256: "826b51da4e10a08849a9a242ba78459aab8edbe75d3347a8d9090055ef2a59a7"
@@ -502,7 +502,7 @@ packages:
     source: hosted
     version: "1.5.3"
   postgres:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: postgres
       sha256: "45a7ea2d064526500a44b1a62680e21406d5b3f3f3b1c21feb8b3053c2bad95e"

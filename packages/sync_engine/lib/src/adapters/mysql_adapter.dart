@@ -3,11 +3,12 @@ import 'package:mysql1/mysql1.dart';
 import '../core/adapter.dart';
 import '../core/change.dart';
 import '../core/json.dart';
+import '../core/schema.dart';
 import 'sql.dart';
 
 /// Syncs MySQL / MariaDB tables. Collection names are table names; see
 /// [SqlTable] for what each table needs.
-class MySqlAdapter implements SyncAdapter {
+class MySqlAdapter implements SyncAdapter, SchemaInspector {
   MySqlAdapter({
     required this.settings,
     this.tables = const {},
@@ -71,6 +72,25 @@ class MySqlAdapter implements SyncAdapter {
     );
   }
 
+  @override
+  bool get hasSchema => true;
+
+  @override
+  Future<CollectionSchema?> describe(String collection) async {
+    final stmt = _dialect.describe(collection);
+    final rows = await _conn.query(stmt.sql, stmt.params);
+    return _dialect.schemaFrom([
+      for (final row in rows)
+        row.toColumnMap().map(
+          (k, v) => MapEntry(k, v is Blob ? v.toString() : v),
+        ),
+    ], _table(collection));
+  }
+
+  /// MySQL grants are too varied to check reliably without writing.
+  @override
+  Future<bool?> canWrite(String collection) async => null;
+
   /// Applies the batch in one transaction.
   @override
   Future<void> push(String collection, List<Change> changes) async {
@@ -97,6 +117,45 @@ final class MySqlDialect extends SqlDialect {
 
   @override
   String placeholder(int index) => '?';
+
+  @override
+  SqlStatement describe(String table) {
+    final dot = table.indexOf('.');
+    return (
+      sql:
+          'SELECT COLUMN_NAME AS column_name, DATA_TYPE AS data_type, '
+          'IS_NULLABLE AS is_nullable, COLUMN_DEFAULT AS column_default '
+          'FROM information_schema.COLUMNS '
+          'WHERE TABLE_SCHEMA = ${dot == -1 ? 'DATABASE()' : '?'} '
+          'AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION',
+      params: [
+        if (dot != -1) table.substring(0, dot),
+        dot == -1 ? table : table.substring(dot + 1),
+      ],
+    );
+  }
+
+  @override
+  FieldKind kindOf(String dataType) => switch (dataType) {
+    'char' ||
+    'varchar' ||
+    'tinytext' ||
+    'text' ||
+    'mediumtext' ||
+    'longtext' => FieldKind.string,
+    'tinyint' ||
+    'smallint' ||
+    'mediumint' ||
+    'int' ||
+    'bigint' ||
+    'decimal' ||
+    'float' ||
+    'double' => FieldKind.number,
+    'bool' || 'boolean' => FieldKind.boolean,
+    'date' || 'datetime' || 'timestamp' => FieldKind.timestamp,
+    'json' => FieldKind.json,
+    _ => FieldKind.other,
+  };
 
   /// `VALUES(col)` works on MySQL 5.x/8.x and MariaDB alike.
   @override

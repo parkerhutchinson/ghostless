@@ -181,6 +181,7 @@ class MainApp extends StatelessWidget {
                 settings: settings,
                 profiles: profiles,
                 activity: activity,
+                sync: data.sync,
               ),
             ),
             // Replaces the native title bar: drag to move, double-click to zoom.
