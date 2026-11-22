@@ -2,6 +2,7 @@ import 'package:sync_engine/sync_engine.dart';
 
 import '../data/ids.dart';
 import 'project.dart';
+import 'project_logo.dart';
 import '../tasks/task.dart' show TaskColumn;
 
 /// Reads and writes projects in the local store. Saves locally right away;
@@ -25,14 +26,20 @@ class ProjectRepository {
   /// Creates a project at the bottom of the sidebar. Without [colorIndex],
   /// picks the next color in turn. With [ownerId], it's that profile's
   /// personal project.
-  Project create(String name, {int? colorIndex, String? ownerId}) {
+  Project create(
+    String name, {
+    int? colorIndex,
+    String? ownerId,
+    ProjectLogo? logo,
+  }) {
     final all = current();
     final project = Project(
       id: newId(),
       name: name,
-      colorIndex: colorIndex ?? all.length % projectColors.length,
+      colorIndex: colorIndex ?? all.length % projectHueCount,
       order: all.isEmpty ? 0 : all.last.order + 1,
       ownerId: ownerId,
+      logo: logo,
       createdAt: DateTime.now().toUtc(),
     );
     save(project);
@@ -113,4 +120,34 @@ class ProjectRepository {
             ? a.order.compareTo(b.order)
             : a.createdAt.compareTo(b.createdAt),
       );
+
+  /// Keeps [labels] on [projectId] for the task form to suggest, adding
+  /// only ones it doesn't have yet (ignoring case). [colors] (palette
+  /// index by label, lowercased) are the colors picked for new ones; a
+  /// label's first color sticks.
+  void addLabels(
+    String projectId,
+    Iterable<String> labels, {
+    Map<String, int> colors = const {},
+  }) {
+    final project = get(projectId);
+    if (project == null) return;
+    final known = {for (final l in project.labels) l.toLowerCase()};
+    final added = [
+      for (final l in labels.map((l) => l.trim()))
+        if (l.isNotEmpty && known.add(l.toLowerCase())) l,
+    ];
+    final newColors = {
+      for (final l in labels.map((l) => l.trim().toLowerCase()))
+        if (colors[l] case final c?)
+          if (!project.labelColors.containsKey(l)) l: c,
+    };
+    if (added.isEmpty && newColors.isEmpty) return;
+    save(
+      project.copyWith(
+        labels: [...project.labels, ...added],
+        labelColors: {...project.labelColors, ...newColors},
+      ),
+    );
+  }
 }

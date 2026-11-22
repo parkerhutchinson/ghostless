@@ -20,6 +20,7 @@ import 'project.dart';
 import 'project_dialog.dart';
 import 'project_repository.dart';
 import 'project_sidebar.dart';
+import '../sync_status_indicator.dart';
 import '../app_theme.dart';
 
 /// Sidebar of projects next to the selected project's tasks.
@@ -101,22 +102,33 @@ class _WorkspaceState extends State<Workspace> {
   Future<void> _create() async {
     final result = await showProjectDialog(
       context,
-      defaultColorIndex:
-          widget.projects.current().length % projectColors.length,
+      defaultColorIndex: widget.projects.current().length % projectHueCount,
     );
     if (result == null) return;
     final project = widget.projects.create(
       result.name,
       colorIndex: result.colorIndex,
+      logo: result.logo,
     );
     _select(project.id);
   }
 
-  Future<void> _rename(Project project) async {
-    final result = await showProjectDialog(context, project: project);
+  /// The project's dialog: saves its name and color, or deletes it
+  /// (except a personal project).
+  Future<void> _edit(Project project) async {
+    final result = await showProjectDialog(
+      context,
+      project: project,
+      canDelete: !project.isPersonal,
+    );
     if (result == null) return;
+    if (result.delete) return _delete(project);
     widget.projects.save(
-      project.copyWith(name: result.name, colorIndex: result.colorIndex),
+      project.copyWith(
+        name: result.name,
+        colorIndex: result.colorIndex,
+        logo: result.logo,
+      ),
     );
   }
 
@@ -224,7 +236,7 @@ class _WorkspaceState extends State<Workspace> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          width: 220,
+          width: sidebarWidth,
           child: StreamBuilder<List<Task>>(
             stream: _tasks,
             initialData: widget.tasks.current(),
@@ -256,9 +268,12 @@ class _WorkspaceState extends State<Workspace> {
                 selectedId: selected?.id,
                 onSelect: _select,
                 onCreate: _create,
-                onRename: _rename,
-                onDelete: _delete,
+                onEdit: _edit,
                 onDropTask: _addTask,
+                syncStatus: switch (widget.sync) {
+                  final sync? => SyncStatusIndicator(sync: sync),
+                  null => null,
+                },
                 onOpenSettings: () => showSettingsDialog(
                   context,
                   widget.settings,
@@ -269,25 +284,28 @@ class _WorkspaceState extends State<Workspace> {
           ),
         ),
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(top: titleBarHeight),
-            child: showActivity
-                ? ActivityPage(
-                    activity: widget.activity,
-                    tasks: widget.tasks,
-                    profileId: profile.id,
-                    projects: projects,
-                  )
-                : selected == null
-                ? _NoProjects(onCreate: _create)
-                : TasksPage(
-                    repo: widget.tasks,
-                    title: selected.name,
-                    projectId: selected.id,
-                    projects: projects,
-                    projectRepo: widget.projects,
-                  ),
-          ),
+          // From the top of the window: each page's header (FrostedBar)
+          // clears the title bar strip itself.
+          child: showActivity
+              ? ActivityPage(
+                  activity: widget.activity,
+                  tasks: widget.tasks,
+                  profileId: profile.id,
+                  projects: projects,
+                  projectRepo: widget.projects,
+                )
+              : selected == null
+              ? Padding(
+                  padding: const EdgeInsets.only(top: titleBarHeight),
+                  child: _NoProjects(onCreate: _create),
+                )
+              : TasksPage(
+                  repo: widget.tasks,
+                  title: selected.name,
+                  projectId: selected.id,
+                  projects: projects,
+                  projectRepo: widget.projects,
+                ),
         ),
       ],
     );
@@ -308,7 +326,7 @@ class _NoProjects extends StatelessWidget {
           Icon(Symbols.folder, size: 40),
           const Text(
             'Tasks live in projects',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w400),
           ),
           Text(
             'Create a project to start adding tasks.',

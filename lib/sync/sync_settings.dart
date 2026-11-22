@@ -38,7 +38,7 @@ class SyncSettingsSection extends StatelessWidget {
             'Sync',
             style: TextStyle(
               fontSize: 12,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w400,
               color: context.colors.text,
             ),
           ),
@@ -425,7 +425,7 @@ class _ReportView extends StatelessWidget {
             report.compatible
                 ? 'This database works with the app.'
                 : 'This database doesn’t fit the app yet.',
-            style: const TextStyle(fontWeight: FontWeight.w600),
+            style: const TextStyle(fontWeight: FontWeight.w400),
           ),
           for (final r in report.results)
             Row(
@@ -449,7 +449,7 @@ class _ReportView extends StatelessWidget {
                         if (r.collection case final c?)
                           TextSpan(
                             text: '$c  ',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+                            style: const TextStyle(fontWeight: FontWeight.w400),
                           ),
                         TextSpan(text: r.message),
                       ],

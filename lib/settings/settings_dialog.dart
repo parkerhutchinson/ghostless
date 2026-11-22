@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../sync/sync_service.dart';
 import '../sync/sync_settings.dart';
+import '../tasks/label_colors.dart';
 import 'background.dart';
 import 'settings_repository.dart';
 import '../app_theme.dart';
@@ -42,10 +43,16 @@ class _SettingsDialog extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             spacing: 16,
             children: [
-              StreamBuilder<Background>(
+              StreamBuilder<Background?>(
                 stream: settings.watchBackground(),
                 initialData: settings.background,
-                builder: (context, snap) => _BackgroundPicker(
+                builder: (context, snap) =>
+                    _BackgroundPicker(settings: settings, current: snap.data),
+              ),
+              StreamBuilder<Color>(
+                stream: settings.watchBackgroundColor(),
+                initialData: settings.backgroundColor,
+                builder: (context, snap) => _BackgroundColorPicker(
                   settings: settings,
                   current: snap.requireData,
                 ),
@@ -76,10 +83,12 @@ class _SettingsDialog extends StatelessWidget {
   }
 }
 
+/// The image behind the window. Only the picture changes: the colors
+/// follow the background color below.
 class _BackgroundPicker extends StatelessWidget {
   const _BackgroundPicker({required this.settings, required this.current});
   final SettingsRepository settings;
-  final Background current;
+  final Background? current;
 
   Future<void> _pickImage() async {
     final file = await openFile(
@@ -107,11 +116,15 @@ class _BackgroundPicker extends StatelessWidget {
           spacing: 10,
           runSpacing: 10,
           children: [
+            _NoImageTile(
+              selected: current == null,
+              onTap: () => settings.setBackground(null),
+            ),
             _ImageTile(
-              label: 'Mountains',
-              image: const AssetImage(MountainsBackground.asset),
-              selected: current is MountainsBackground,
-              onTap: () => settings.setBackground(const MountainsBackground()),
+              label: 'Default',
+              image: const AssetImage(DefaultBackground.asset),
+              selected: current is DefaultBackground,
+              onTap: () => settings.setBackground(const DefaultBackground()),
             ),
             if (current is ImageBackground)
               _ImageTile(
@@ -123,28 +136,28 @@ class _BackgroundPicker extends StatelessWidget {
             _ChooseImageTile(onTap: _pickImage),
           ],
         ),
-        const SizedBox(height: 4),
-        _ColorRow(
-          label: 'Background color',
-          presets: backgroundColors,
-          // Nothing is selected while an image is the background.
-          current: switch (current) {
-            ColorBackground(:final color) => color,
-            _ => null,
-          },
-          // The picker starts from the current color, or the default gray.
-          pickerStart: current.baseColor,
-          // Previews never delete a picked image: cancelling puts it back.
-          onPreview: (c) => settings.previewBackground(ColorBackground(c)),
-          onPicked: (c) {
-            settings.setBackground(ColorBackground(c));
-            settings.deleteUnusedBackgroundImages();
-          },
-          onCancel: () => settings.previewBackground(current),
-        ),
       ],
     );
   }
+}
+
+/// The background color: shows when there's no image, and sets the app's
+/// surfaces, borders and text either way.
+class _BackgroundColorPicker extends StatelessWidget {
+  const _BackgroundColorPicker({required this.settings, required this.current});
+  final SettingsRepository settings;
+  final Color current;
+
+  @override
+  Widget build(BuildContext context) => _ColorRow(
+    label: 'Background color',
+    presets: backgroundColors,
+    current: current,
+    pickerStart: current,
+    onPreview: settings.setBackgroundColor,
+    onPicked: settings.setBackgroundColor,
+    onCancel: () => settings.setBackgroundColor(current),
+  );
 }
 
 /// The accent color: the + button, the selected project, filled buttons
@@ -157,7 +170,8 @@ class _AccentPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _ColorRow(
     label: 'Accent color',
-    presets: accentColors,
+    // The label colors, around the color wheel.
+    presets: [for (final i in labelPickerOrder) labelPalette[i]],
     current: current,
     pickerStart: current,
     onPreview: settings.setAccent,
@@ -251,11 +265,16 @@ class _CustomColorTile extends StatelessWidget {
         child: Container(
           width: 30,
           height: 30,
+          // The accent, like the app's other highlights.
           decoration: BoxDecoration(
             borderRadius: formRadius,
-            border: Border.all(color: context.colors.cardBorder),
+            color: Theme.of(context).colorScheme.primary,
           ),
-          child: Icon(Symbols.add, size: 16),
+          child: Icon(
+            Symbols.add,
+            size: 16,
+            color: Theme.of(context).colorScheme.onPrimary,
+          ),
         ),
       ),
     ),
@@ -271,7 +290,7 @@ class _Label extends StatelessWidget {
     text,
     style: TextStyle(
       fontSize: 12,
-      fontWeight: FontWeight.w600,
+      fontWeight: FontWeight.w400,
       color: context.colors.text,
     ),
   );
@@ -314,6 +333,49 @@ class _ImageTile extends StatelessWidget {
               border: _outline(context, selected),
               image: DecorationImage(image: image, fit: BoxFit.cover),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "No image": just the background color.
+class _NoImageTile extends StatelessWidget {
+  const _NoImageTile({required this.selected, required this.onTap});
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'No image',
+      selected: selected,
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: formRadius,
+        child: Container(
+          width: 120,
+          height: 76,
+          decoration: BoxDecoration(
+            borderRadius: formRadius,
+            border: _outline(context, selected),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            spacing: 4,
+            children: [
+              Icon(
+                Symbols.hide_image,
+                size: 20,
+                color: context.colors.mutedText,
+              ),
+              Text(
+                'No image',
+                style: TextStyle(fontSize: 12, color: context.colors.mutedText),
+              ),
+            ],
           ),
         ),
       ),

@@ -117,16 +117,16 @@ void main() {
   test('each profile has its own theme', () async {
     final me = profiles.ensureProfile();
     settings.setAccent(const Color(0xFF7A4FD0));
-    settings.setBackground(const ColorBackground(Color(0xFF19451C)));
+    settings.setBackgroundColor(const Color(0xFF19451C));
+    settings.setBackground(null);
     profiles.create(name: 'Other');
     expect(settings.accent, defaultAccent);
-    expect(
-      settings.background,
-      isNot(const ColorBackground(Color(0xFF19451C))),
-    );
+    expect(settings.backgroundColor, isNot(const Color(0xFF19451C)));
+    expect(settings.background, const DefaultBackground());
     profiles.switchTo(me.id);
     expect(settings.accent, const Color(0xFF7A4FD0));
-    expect(settings.background, const ColorBackground(Color(0xFF19451C)));
+    expect(settings.backgroundColor, const Color(0xFF19451C));
+    expect(settings.background, isNull);
   });
 
   test('switching profiles updates the watched accent', () async {
@@ -154,14 +154,14 @@ void main() {
     final file = settings.backgroundFile(image.fileName);
     // The other profile uses the same image file.
     final other = profiles.create();
-    settings.previewBackground(image);
+    settings.setBackground(image);
     profiles.switchTo(me.id);
-    settings.setBackground(const MountainsBackground());
+    settings.setBackground(const DefaultBackground());
     expect(file.existsSync(), isTrue);
     settings.deleteUnusedBackgroundImages();
     expect(file.existsSync(), isTrue);
     profiles.switchTo(other.id);
-    settings.setBackground(const MountainsBackground());
+    settings.setBackground(const DefaultBackground());
     expect(file.existsSync(), isFalse);
   });
 

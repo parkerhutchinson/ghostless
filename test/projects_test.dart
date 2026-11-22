@@ -628,9 +628,13 @@ void main() {
         findsNothing,
         reason: 'no other projects left to add',
       );
-      await tester.tap(text('Save'));
+      await tester.tap(text('Save changes'));
       await tester.pumpAndSettle();
       expect(tasks.get(t.id)!.projectIds, [home.id, other.id]);
+      // Saving keeps the form open; the arrow closes it.
+      expect(find.byTooltip('Close'), findsOneWidget);
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
 
       await tester.tap(text('Pick a project'));
       await tester.pumpAndSettle();
@@ -641,7 +645,7 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.tap(text('Save'));
+      await tester.tap(text('Save changes'));
       await tester.pumpAndSettle();
       expect(tasks.get(t.id)!.projectIds, [home.id]);
     });
@@ -692,8 +696,6 @@ void main() {
 
       await openProjectMenu(tester, 'Old name');
       await tester.pumpAndSettle();
-      await tester.tap(text('Rename…'));
-      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'New name');
       await tester.pump();
       await tester.tap(text('Save'));
@@ -705,14 +707,14 @@ void main() {
   });
 }
 
-/// The ⋯ only shows while the pointer is over a project row: hover the row
-/// named [name] in the sidebar, then open its menu.
+/// The pencil only shows while the pointer is over a project row: hover the
+/// row named [name] in the sidebar, then open its dialog.
 Future<void> openProjectMenu(WidgetTester tester, String name) async {
   final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
   await mouse.addPointer(location: Offset.zero);
   addTearDown(mouse.removePointer);
   await mouse.moveTo(tester.getCenter(text(name).first));
   await tester.pump();
-  await tester.tap(find.byTooltip('Project options'));
+  await tester.tap(find.byTooltip('Edit project'));
   await tester.pumpAndSettle();
 }

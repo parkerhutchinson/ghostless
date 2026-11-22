@@ -466,7 +466,7 @@ class _MonthCalendarState extends State<_MonthCalendar> {
                     l.formatMonthYear(_month),
                     style: const TextStyle(
                       fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w400,
                     ),
                   ),
                 ),

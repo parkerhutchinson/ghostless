@@ -2,9 +2,13 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../profiles/profile_avatar.dart';
+import '../profiles/profiles_scope.dart';
 import '../projects/project.dart';
+import '../projects/project_logo.dart';
 import '../projects/project_repository.dart';
 import '../widgets/bottom_fade.dart';
+import '../widgets/frosted_bar.dart';
 import '../widgets/undo_snack_bar.dart';
 import 'task.dart';
 import 'task_board.dart';
@@ -76,12 +80,16 @@ class _TasksPageState extends State<TasksPage> {
 
   List<TaskColumn> get _columns => _project?.columns ?? defaultColumns;
 
+  /// Every task in a personal project is its owner's: no assignee shown.
+  bool get _showAssignee => !(_project?.isPersonal ?? false);
+
   void _open(Task task) => showTaskEditor(
     context,
     widget.repo,
     task: task,
     projectId: widget.projectId,
     projects: widget.projects,
+    projectRepo: widget.projectRepo,
     onDelete: task.originId == widget.projectId ? _delete : null,
   );
 
@@ -122,6 +130,7 @@ class _TasksPageState extends State<TasksPage> {
     status: status ?? _columns.first.id,
     projectId: widget.projectId,
     projects: widget.projects,
+    projectRepo: widget.projectRepo,
   );
 
   /// Takes the task out of this project, which it was multi-homed to. No
@@ -217,6 +226,7 @@ class _TasksPageState extends State<TasksPage> {
       onToggleCompleted: () =>
           widget.repo.toggleCompleted(task.id, projectId: widget.projectId),
       onAssign: (id) => widget.repo.assign(task.id, id),
+      showAssignee: _showAssignee,
       onDelete: isOrigin ? () => _delete(task) : null,
       onRemoveFromProject: isOrigin ? null : () => _removeFromProject(task),
     );
@@ -240,6 +250,7 @@ class _TasksPageState extends State<TasksPage> {
         completed: task.isCompletedIn(widget.projectId),
         subtasksExpanded: expanded,
         lifted: true,
+        showAssignee: _showAssignee,
       );
     }
     return TaskCard(
@@ -253,6 +264,7 @@ class _TasksPageState extends State<TasksPage> {
           widget.repo.toggleCompleted(task.id, projectId: widget.projectId),
       onToggleSubtask: (id) => widget.repo.toggleSubtask(task.id, id),
       onAssign: (id) => widget.repo.assign(task.id, id),
+      showAssignee: _showAssignee,
       subtasksExpanded: expanded,
       onToggleSubtasks: () => setState(
         () => expanded ? _expandedCards.remove(key) : _expandedCards.add(key),
@@ -288,10 +300,13 @@ class _TasksPageState extends State<TasksPage> {
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Full window width, with the same side padding as the
+            // The pane's full width, with the same side padding as the
             // board, so the title lines up with the first column.
             _Header(
               title: widget.title,
+              color: _project?.color,
+              ownerId: _project?.ownerId,
+              logo: _project?.logo,
               view: _view,
               onViewChanged: (v) => setState(() => _view = v),
             ),
@@ -341,6 +356,7 @@ class _TasksPageState extends State<TasksPage> {
                     ),
                     TaskView.list => _TaskList(
                       tasks: tasks,
+                      showAssignee: _showAssignee,
                       row: _row,
                       columns: columns,
                       onMove: (task, columnId, index) => widget.repo.move(
@@ -384,46 +400,98 @@ class _TasksPageState extends State<TasksPage> {
 class _Header extends StatelessWidget {
   const _Header({
     required this.title,
+    this.color,
+    this.ownerId,
+    this.logo,
     required this.view,
     required this.onViewChanged,
   });
 
   final String title;
+
+  /// The project's color, shown as a dot before the title (none on pages
+  /// that aren't one project).
+  final Color? color;
+
+  /// A personal project's owner: their avatar replaces the color dot.
+  final String? ownerId;
+
+  /// The project's logo, shown in place of the color dot.
+  final ProjectLogo? logo;
   final TaskView view;
   final ValueChanged<TaskView> onViewChanged;
 
+  /// The owner's avatar on a personal project, else the project's color
+  /// dot; nothing on pages that aren't one project.
+  Widget? _leading(BuildContext context) {
+    final scope = ProfilesScope.maybeOf(context);
+    if (scope?.find(ownerId) case final owner?) {
+      return ProfileAvatar(
+        profile: owner,
+        image: scope!.imageOf(owner),
+        size: 28,
+      );
+    }
+    if (color case final color?) {
+      return ProjectIcon.of(color: color, logo: logo, size: 28);
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+    // On frosted glass across the pane, so the title reads over a
+    // background image.
+    return FrostedBar(
       child: Row(
         spacing: 12,
         children: [
+          ?_leading(context),
           // Takes all the free space, so the view toggle sits at the far right.
           Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
+            // Centering the text's line box centers capitals, but the
+            // lowercase letters sit about 2px below the middle at this
+            // size; lifted 1px, halfway between, to look centered.
+            child: Transform.translate(
+              offset: const Offset(0, -1),
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ),
           SegmentedButton<TaskView>(
             showSelectedIcon: false,
             style: SegmentedButton.styleFrom(
               visualDensity: VisualDensity.compact,
+              // Light and small, like the labels.
+              textStyle: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w400,
+              ),
               // Same border color as the task cards.
               side: BorderSide(color: context.colors.cardBorder),
+              // The inactive view on the background color, so it reads
+              // over a background image; the active one on the accent.
+              backgroundColor: context.colors.surface,
+              selectedBackgroundColor: Theme.of(context)
+                  .colorScheme
+                  .secondaryContainer,
             ),
             segments: const [
               ButtonSegment(
                 value: TaskView.board,
-                icon: Icon(Symbols.view_week, size: 18),
+                icon: Icon(Symbols.view_week, size: 16),
                 label: Text('Board'),
               ),
               ButtonSegment(
                 value: TaskView.list,
-                icon: Icon(Symbols.view_agenda, size: 18),
+                icon: Icon(Symbols.view_agenda, size: 16),
                 label: Text('List'),
               ),
             ],
@@ -455,10 +523,14 @@ class _TaskList extends StatefulWidget {
     required this.onMoveSubtask,
     required this.projectId,
     this.editingColumnId,
+    this.showAssignee = true,
   });
 
   /// The project shown (row expansion is kept per project).
   final String projectId;
+
+  /// The header has an Assignee column (not on a personal project).
+  final bool showAssignee;
 
   /// Moves a section to an index (counted without it), like dragging a
   /// column on the board.
@@ -534,7 +606,9 @@ class _TaskListState extends State<_TaskList> {
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [TaskTable.header(context)],
+                children: [
+                  TaskTable.header(context, showAssignee: widget.showAssignee),
+                ],
               ),
             ),
             Expanded(
@@ -600,6 +674,8 @@ class _TaskListState extends State<_TaskList> {
       startEditing: full && column.id == widget.editingColumnId,
     );
     const headerPadding = EdgeInsets.fromLTRB(TaskTable.cellPadding, 12, 4, 0);
+    // Inside the glass: the same left and right as headerPadding.
+    const glassPadding = EdgeInsets.fromLTRB(TaskTable.cellPadding, 0, 4, 0);
     return ColumnDropTarget(
       key: ValueKey(column.id),
       accepts: (c) => c.id != column.id,
@@ -631,13 +707,20 @@ class _TaskListState extends State<_TaskList> {
             childWhenDragging: Opacity(
               opacity: 0.4,
               child: Padding(
-                padding: headerPadding,
-                child: header(full: false),
+                padding: const EdgeInsets.only(top: 12),
+                child: FrostedHeader(
+                  padding: glassPadding,
+                  child: header(full: false),
+                ),
               ),
             ),
+            // On glass, like the page's header, so it reads over an image.
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
-              child: Padding(padding: headerPadding, child: header()),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: FrostedHeader(padding: glassPadding, child: header()),
+              ),
             ),
           ),
           DragTarget<Task>(
@@ -652,9 +735,11 @@ class _TaskListState extends State<_TaskList> {
               ),
               // The rows sit on the card shade (lighter or darker than the
               // background, like the board's cards); an empty section's
-              // "No tasks" has none.
+              // "No tasks" on the background color.
               child: ColoredBox(
-                color: group.isEmpty ? Colors.transparent : context.colors.card,
+                color: group.isEmpty
+                    ? context.colors.surface
+                    : context.colors.card,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [

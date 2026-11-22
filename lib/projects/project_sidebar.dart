@@ -8,6 +8,7 @@ import '../profiles/profile.dart';
 import '../profiles/profile_avatar.dart';
 import '../tasks/task.dart';
 import 'project.dart';
+import 'project_logo.dart';
 import '../app_theme.dart';
 
 /// Solid sidebar fill; the traffic lights sit on top of it.
@@ -22,8 +23,7 @@ class ProjectSidebar extends StatelessWidget {
     required this.selectedId,
     required this.onSelect,
     required this.onCreate,
-    required this.onRename,
-    required this.onDelete,
+    required this.onEdit,
     required this.onDropTask,
     required this.onOpenSettings,
     required this.profile,
@@ -33,6 +33,7 @@ class ProjectSidebar extends StatelessWidget {
     required this.onOpenActivity,
     this.personal,
     this.profileImage,
+    this.syncStatus,
   });
 
   /// The shared (company) projects.
@@ -59,14 +60,18 @@ class ProjectSidebar extends StatelessWidget {
   final String? selectedId;
   final ValueChanged<String> onSelect;
   final VoidCallback onCreate;
-  final ValueChanged<Project> onRename;
-  final ValueChanged<Project> onDelete;
+
+  /// The pencil on a project row: its name, color and Delete.
+  final ValueChanged<Project> onEdit;
 
   /// A task card was dropped on a project it isn't in yet.
   final void Function(Task task, String projectId) onDropTask;
 
   /// The Settings button at the bottom.
   final VoidCallback onOpenSettings;
+
+  /// The sync status icon, just left of Settings (left out in tests).
+  final Widget? syncStatus;
 
   int _taskCount(String projectId) => tasks
       .where((t) => t.isIn(projectId) && !t.isCompletedIn(projectId))
@@ -92,7 +97,8 @@ class ProjectSidebar extends StatelessWidget {
             decoration: BoxDecoration(
               border: Border(top: BorderSide(color: context.colors.cardBorder)),
             ),
-            // The profile's avatar at the left, Settings at the right.
+            // The profile's avatar at the left; sync status and Settings at
+            // the right.
             child: Row(
               spacing: 4,
               children: [
@@ -111,6 +117,7 @@ class ProjectSidebar extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
+                ?syncStatus,
                 // Just the icon, at the right edge.
                 IconButton(
                   tooltip: 'Settings',
@@ -151,10 +158,7 @@ class ProjectSidebar extends StatelessWidget {
             onTap: () => onSelect(p.id),
             acceptsTask: (t) => !t.isIn(p.id),
             onDropTask: (t) => onDropTask(t, p.id),
-            menu: (onOpenChanged) => _ProjectMenu(
-              onRename: () => onRename(p),
-              onOpenChanged: onOpenChanged,
-            ),
+            action: _EditButton(onPressed: () => onEdit(p)),
           ),
           const SizedBox(height: 12),
         ],
@@ -186,18 +190,14 @@ class ProjectSidebar extends StatelessWidget {
         for (final p in projects)
           _SidebarItem(
             key: ValueKey(p.id),
-            leading: Icon(Icons.circle, size: 10, color: p.color),
+            leading: ProjectIcon(project: p),
             label: p.name,
             count: _taskCount(p.id),
             selected: !activitySelected && selectedId == p.id,
             onTap: () => onSelect(p.id),
             acceptsTask: (t) => !t.isIn(p.id),
             onDropTask: (t) => onDropTask(t, p.id),
-            menu: (onOpenChanged) => _ProjectMenu(
-              onRename: () => onRename(p),
-              onDelete: () => onDelete(p),
-              onOpenChanged: onOpenChanged,
-            ),
+            action: _EditButton(onPressed: () => onEdit(p)),
           ),
         if (projects.isEmpty)
           Padding(
@@ -223,7 +223,7 @@ class _SidebarItem extends StatefulWidget {
     this.acceptsTask,
     this.onDropTask,
     this.countIsBadge = false,
-    this.menu,
+    this.action,
   });
 
   final Widget leading;
@@ -241,9 +241,8 @@ class _SidebarItem extends StatefulWidget {
   /// muted text (a project's open tasks).
   final bool countIsBadge;
 
-  /// The ⋯ menu, shown on hover. Builds it with a callback that reports
-  /// whether the menu is open.
-  final Widget Function(ValueChanged<bool> onOpenChanged)? menu;
+  /// A button shown in place of the count on hover (a project's pencil).
+  final Widget? action;
 
   @override
   State<_SidebarItem> createState() => _SidebarItemState();
@@ -251,7 +250,6 @@ class _SidebarItem extends StatefulWidget {
 
 class _SidebarItemState extends State<_SidebarItem> {
   bool _hover = false;
-  bool _menuOpen = false;
 
   @override
   Widget build(BuildContext context) {
@@ -260,9 +258,7 @@ class _SidebarItemState extends State<_SidebarItem> {
       onAcceptWithDetails: (d) => widget.onDropTask?.call(d.data),
       builder: (context, candidates, _) {
         final dropping = candidates.isNotEmpty;
-        // Only on hover; kept while its menu is open (the pointer has left the
-        // row by then), or the menu's choice would be dropped.
-        final showMenu = widget.menu != null && (_hover || _menuOpen);
+        final action = _hover ? widget.action : null;
         return MouseRegion(
           onEnter: (_) => setState(() => _hover = true),
           onExit: (_) => setState(() => _hover = false),
@@ -300,14 +296,12 @@ class _SidebarItemState extends State<_SidebarItem> {
                             color: widget.selected && !dropping
                                 ? Theme.of(context).colorScheme.onPrimary
                                 : null,
-                            fontWeight: widget.selected
-                                ? FontWeight.w600
-                                : FontWeight.w400,
+                            fontWeight: FontWeight.w400,
                           ),
                         ),
                       ),
-                      if (showMenu)
-                        widget.menu!((open) => setState(() => _menuOpen = open))
+                      if (action != null)
+                        action
                       else if (widget.count > 0 && widget.countIsBadge)
                         Padding(
                           padding: const EdgeInsets.only(right: 4),
@@ -317,8 +311,24 @@ class _SidebarItemState extends State<_SidebarItem> {
                           ),
                         )
                       else if (widget.count > 0)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
+                        // In the light border line, like the cards'.
+                        Container(
+                          margin: const EdgeInsets.only(right: 4),
+                          height: sidebarBoxSize,
+                          constraints: const BoxConstraints(
+                            minWidth: sidebarBoxSize,
+                          ),
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          decoration: BoxDecoration(
+                            borderRadius: formRadius,
+                            border: Border.all(
+                              color: widget.selected && !dropping
+                                  ? Theme.of(context).colorScheme.onPrimary
+                                        .withValues(alpha: 0.4)
+                                  : context.colors.cardBorder,
+                            ),
+                          ),
                           child: Text(
                             '${widget.count}',
                             style: TextStyle(
@@ -327,6 +337,9 @@ class _SidebarItemState extends State<_SidebarItem> {
                                   ? Theme.of(context).colorScheme.onPrimary
                                         .withValues(alpha: 0.75)
                                   : context.colors.mutedText,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
                             ),
                           ),
                         ),
@@ -365,7 +378,7 @@ class _Badge extends StatelessWidget {
         count > 99 ? '99+' : '$count',
         style: TextStyle(
           fontSize: 11,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w400,
           color: onAccent ? scheme.primary : scheme.onPrimary,
           fontFeatures: const [FontFeature.tabularFigures()],
         ),
@@ -374,58 +387,34 @@ class _Badge extends StatelessWidget {
   }
 }
 
-class _ProjectMenu extends StatelessWidget {
-  const _ProjectMenu({
-    required this.onRename,
-    this.onDelete,
-    required this.onOpenChanged,
-  });
-  final VoidCallback onRename;
+/// The pencil on a project row: opens the project's dialog (name, color,
+/// and Delete).
+/// The side of a project row's count box and its edit button.
+const sidebarBoxSize = 22.0;
 
-  /// Null for a personal project, which can't be deleted.
-  final VoidCallback? onDelete;
-  final ValueChanged<bool> onOpenChanged;
+class _EditButton extends StatelessWidget {
+  const _EditButton({required this.onPressed});
+  final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<VoidCallback>(
-      tooltip: 'Project options',
-      iconSize: 17,
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(right: 4),
+    // The same size as the count box it replaces.
+    child: IconButton(
+      tooltip: 'Edit project',
+      iconSize: 14,
       padding: EdgeInsets.zero,
-      style: context.colors.menuButtonStyle,
-      icon: Icon(Symbols.more_horiz),
-      onOpened: () => onOpenChanged(true),
-      onCanceled: () => onOpenChanged(false),
-      onSelected: (action) {
-        onOpenChanged(false);
-        action();
-      },
-      itemBuilder: (_) => [
-        PopupMenuItem(
-          value: onRename,
-          child: const ListTile(
-            dense: true,
-            leading: Icon(Symbols.edit, size: 18),
-            title: Text('Rename…'),
-          ),
-        ),
-        if (onDelete case final onDelete?)
-          PopupMenuItem(
-            value: onDelete,
-            child: ListTile(
-              dense: true,
-              leading: Icon(
-                Symbols.delete,
-                size: 18,
-                color: Colors.red.shade300,
-              ),
-              title: Text(
-                'Delete project',
-                style: TextStyle(color: Colors.red.shade300),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
+      constraints: const BoxConstraints.tightFor(
+        width: sidebarBoxSize,
+        height: sidebarBoxSize,
+      ),
+      style: context.colors.menuButtonStyle.copyWith(
+        minimumSize: const WidgetStatePropertyAll(Size.square(sidebarBoxSize)),
+        fixedSize: const WidgetStatePropertyAll(Size.square(sidebarBoxSize)),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: onPressed,
+      icon: Icon(Symbols.edit),
+    ),
+  );
 }

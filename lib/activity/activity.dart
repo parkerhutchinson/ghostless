@@ -34,7 +34,7 @@ enum TaskChange {
   completed('checked it off'),
   reopened('unchecked it'),
   subtasks('changed the subtasks'),
-  tags('changed the tags'),
+  tags('changed the labels'),
   images('changed the card image'),
   projects('changed its projects');
 
@@ -102,6 +102,7 @@ final class Activity {
     this.dueAt,
     required this.createdAt,
     this.readAt,
+    this.dismissedAt,
   });
 
   final String id;
@@ -134,11 +135,18 @@ final class Activity {
 
   bool get isUnread => readAt == null;
 
+  /// When the recipient dismissed it; it's hidden from then on. Kept (not
+  /// deleted) so a reminder isn't added again, until [prune] removes it.
+  final DateTime? dismissedAt;
+
+  bool get isDismissed => dismissedAt != null;
+
   Activity copyWith({
     String? taskTitle,
     List<TaskChange>? changes,
     DateTime? createdAt,
     DateTime? readAt,
+    DateTime? dismissedAt,
   }) => Activity(
     id: id,
     recipientId: recipientId,
@@ -150,6 +158,7 @@ final class Activity {
     dueAt: dueAt,
     createdAt: createdAt ?? this.createdAt,
     readAt: readAt ?? this.readAt,
+    dismissedAt: dismissedAt ?? this.dismissedAt,
   );
 
   Map<String, Object?> toJson() => {
@@ -162,6 +171,7 @@ final class Activity {
     'dueAt': dueAt?.toUtc().toIso8601String(),
     'createdAt': createdAt.toUtc().toIso8601String(),
     'readAt': readAt?.toUtc().toIso8601String(),
+    'dismissedAt': dismissedAt?.toUtc().toIso8601String(),
   };
 
   /// Null for a record this version can't read (no recipient or task, or a
@@ -189,6 +199,7 @@ final class Activity {
           DateTime.tryParse(json['createdAt'] as String? ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
       readAt: DateTime.tryParse(json['readAt'] as String? ?? ''),
+      dismissedAt: DateTime.tryParse(json['dismissedAt'] as String? ?? ''),
     );
   }
 }

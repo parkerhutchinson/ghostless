@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -7,9 +10,17 @@ import '../data/ids.dart';
 import '../profiles/profile_avatar.dart';
 import '../profiles/profiles_scope.dart';
 import '../projects/project.dart';
+import '../projects/project_repository.dart';
+import '../projects/project_logo.dart';
 import 'due_date_field.dart';
+import 'form_buttons.dart';
+import 'label_colors.dart';
+import 'label_field.dart';
+import 'labels_sheet.dart';
+import 'project_labels.dart';
 import 'task.dart';
 import 'task_card.dart';
+import 'rich_text/rich_text_editor.dart';
 import 'task_repository.dart';
 import '../app_theme.dart';
 import '../widgets/left_menu_button.dart';
@@ -25,6 +36,7 @@ Future<void> showTaskEditor(
   String status = 'todo',
   required String projectId,
   List<Project> projects = const [],
+  ProjectRepository? projectRepo,
   ValueChanged<Task>? onDelete,
 }) => showGeneralDialog<void>(
   context: context,
@@ -42,6 +54,7 @@ Future<void> showTaskEditor(
       initialStatus: status,
       projectId: projectId,
       projects: projects,
+      projectRepo: projectRepo,
       onDelete: onDelete,
     ),
   ),
@@ -60,7 +73,7 @@ Future<void> showTaskEditor(
 
 /// Placeholder text color for every field in the form (30% white).
 
-/// Space between the form's fields, and around the Mark complete button.
+/// Space between the form's fields.
 const _gap = 16.0;
 
 /// Width of the editor panel: room for the Project and Column pickers side
@@ -70,7 +83,7 @@ const taskEditorWidth = 520.0;
 /// Width of the Column and Assignee pickers, kept the same.
 const _pickerWidth = 220.0;
 
-/// Edits a task's title, description, column, tags and images. Changes are
+/// Edits a task's title, description, column, labels and images. Changes are
 /// only saved with Save; Cancel discards them (including picked images).
 class TaskEditor extends StatefulWidget {
   const TaskEditor({
@@ -80,8 +93,12 @@ class TaskEditor extends StatefulWidget {
     this.initialStatus = 'todo',
     required this.projectId,
     this.projects = const [],
+    this.projectRepo,
     this.onDelete,
   });
+
+  /// Where the task's labels are kept for suggesting on other tasks.
+  final ProjectRepository? projectRepo;
 
   final TaskRepository repo;
   final Task? task;
@@ -101,9 +118,11 @@ class TaskEditor extends StatefulWidget {
   State<TaskEditor> createState() => _TaskEditorState();
 }
 
-/// Text size of the tag and project chips, and of the Column and Due date
+/// Text size of the label and project chips, and of the Column and Due date
 /// fields' values.
-const _chipFontSize = 12.5;
+const _chipFontSize = formChipFontSize;
+const _chipHeight = formChipHeight;
+final _chipSizedButton = formButtonStyle;
 
 /// Text size of the description and the subtasks: the same as the
 /// section labels.
@@ -111,11 +130,13 @@ const _descriptionFontSize = 12.0;
 
 class _TaskEditorState extends State<TaskEditor> {
   late final _title = TextEditingController(text: widget.task?.title);
-  late final _description = TextEditingController(
-    text: widget.task?.description,
+
+  /// Bold, italic, links and lists; saved as Markdown.
+  late final _description = RichTextController.fromMarkdown(
+    widget.task?.description ?? '',
   );
-  final _tagInput = TextEditingController();
-  final _tagFocus = FocusNode();
+  final _labelInput = TextEditingController();
+  final _labelFocus = FocusNode();
   final _projectInput = TextEditingController();
   final _projectFocus = FocusNode();
   late String _status = widget.task?.status ?? widget.initialStatus;
@@ -156,7 +177,7 @@ class _TaskEditorState extends State<TaskEditor> {
 
   TextEditingController _titleOf(Subtask s) => _subtaskTitles.putIfAbsent(
     s.id,
-    () => TextEditingController(text: s.title),
+    () => TextEditingController(text: s.title)..addListener(_changed),
   );
 
   void _addSubtask(String text) {
@@ -188,9 +209,23 @@ class _TaskEditorState extends State<TaskEditor> {
   /// It always stays there, so it isn't offered in the Multi-home field.
   late final String _originId = widget.task?.originId ?? widget.projectId;
 
+  /// Whose personal project the task belongs to; null for a shared one.
+  /// A personal task is always assigned to that person.
+  late final String? _personalOwner = widget.projects
+      .where((p) => p.id == _originId)
+      .firstOrNull
+      ?.ownerId;
+
+  /// Who it's saved as assigned to.
+  String? get _assignee => _personalOwner ?? _assigneeId;
+
   /// The projects picked in the Multi-home field.
   late final Set<String> _multiHomes = {...?widget.task?.multiHomes};
-  late final List<String> _tags = [...?widget.task?.tags];
+  late final List<String> _labels = [...?widget.task?.tags];
+
+  /// Colors picked for labels created here (palette index, by label
+  /// lowercased); kept on the project when saved.
+  final Map<String, int> _newLabelColors = {};
 
   /// The card image: at most one. (Tasks saved when several were allowed
   /// keep their first; the others are removed when saved.)
@@ -198,10 +233,49 @@ class _TaskEditorState extends State<TaskEditor> {
 
   /// Images copied in during this session; deleted again on cancel.
   final Set<String> _added = {};
-  bool _saved = false;
 
-  bool get _isNew => widget.task == null;
-  bool get _canSave => _title.text.trim().isNotEmpty;
+  /// The task as last saved here: [TaskEditor.task], or the one created
+  /// by the first Save. Saving keeps the form open, so later saves update
+  /// it.
+  late Task? _task = widget.task;
+
+  /// Just saved: "Saved" shows by the button for a moment.
+  bool _justSaved = false;
+  Timer? _savedTimer;
+
+  bool get _isNew => _task == null;
+
+  /// Has a title, and something changed since it was opened or last
+  /// saved: only then is Save lit.
+  bool get _canSave => _title.text.trim().isNotEmpty && _isDirty;
+
+  /// The form as it was last saved (or opened); see [_snapshot].
+  late String _savedSnapshot;
+
+  bool get _isDirty => _snapshot() != _savedSnapshot;
+
+  /// Everything Save would save (and text typed but not yet added), as one
+  /// comparable value.
+  String _snapshot() => jsonEncode({
+    'title': _title.text.trim(),
+    'description': _description.toMarkdown().trim(),
+    'status': _status,
+    'completed': _completed,
+    'dueDate': _dueDate?.toIso8601String(),
+    'dueTime': _dueTime,
+    'assignee': _assignee,
+    'multiHomes': _validMultiHomes,
+    'labels': _labels,
+    'labelColors': _newLabelColors,
+    'labelInput': _labelInput.text.trim(),
+    'images': _images,
+    'subtasks': [
+      for (final s in _subtasks) [s.id, _titleOf(s).text.trim(), s.done],
+    ],
+    'subtaskInput': _subtaskInput.text.trim(),
+  });
+
+  void _changed() => setState(() {});
 
   /// Picked projects that still exist (one may have been deleted while the
   /// editor was open), in sidebar order.
@@ -213,17 +287,22 @@ class _TaskEditorState extends State<TaskEditor> {
   @override
   void initState() {
     super.initState();
-    _title.addListener(() => setState(() {}));
+    for (final c in [_title, _description, _labelInput, _subtaskInput]) {
+      c.addListener(_changed);
+    }
+    _savedSnapshot = _snapshot();
   }
 
   @override
   void dispose() {
-    // Closed without saving (Cancel, Escape, clicking outside).
-    if (!_saved) _added.forEach(widget.repo.deleteImage);
+    // Closed (the arrow, Escape, clicking outside): images picked since
+    // the last save go with the unsaved edits.
+    _added.forEach(widget.repo.deleteImage);
+    _savedTimer?.cancel();
     _title.dispose();
     _description.dispose();
-    _tagInput.dispose();
-    _tagFocus.dispose();
+    _labelInput.dispose();
+    _labelFocus.dispose();
     _projectInput.dispose();
     _projectFocus.dispose();
     _subtaskInput.dispose();
@@ -234,14 +313,58 @@ class _TaskEditorState extends State<TaskEditor> {
     super.dispose();
   }
 
-  void _addTags(String input) {
-    final newTags = input
-        .split(',')
-        .map((t) => t.trim())
-        .where((t) => t.isNotEmpty && !_tags.contains(t));
-    setState(() => _tags.addAll(newTags.toSet()));
-    _tagInput.clear();
-    _tagFocus.requestFocus();
+  /// Labels already used in this task's projects (kept on the project, or
+  /// on its tasks), to pick from instead of retyping. Sorted, one per
+  /// spelling ignoring case.
+  List<String> get _knownLabels {
+    final ids = {_originId, widget.projectId};
+    final byKey = <String, String>{};
+    // Read fresh from the store: the projects handed in are as they were
+    // when the form opened, before any labels were edited or deleted.
+    final projects = [
+      for (final id in ids)
+        ?(widget.projectRepo?.get(id) ??
+            widget.projects.where((p) => p.id == id).firstOrNull),
+    ];
+    for (final p in projects) {
+      for (final l in p.labels) {
+        byKey.putIfAbsent(l.toLowerCase(), () => l);
+      }
+    }
+    for (final id in ids) {
+      for (final t in widget.repo.inProject(id)) {
+        for (final l in t.tags) {
+          byKey.putIfAbsent(l.toLowerCase(), () => l);
+        }
+      }
+    }
+    return byKey.values.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  }
+
+  /// Adds the comma-separated labels in [input], spelled as an existing
+  /// label when one matches (ignoring case). A new one gets [color] (a
+  /// palette index) when given.
+  void _addLabels(String input, {int? color}) {
+    final known = {for (final l in _knownLabels) l.toLowerCase(): l};
+    final have = {for (final l in _labels) l.toLowerCase()};
+    final added = [
+      for (final l in input.split(',').map((l) => l.trim()))
+        if (l.isNotEmpty && have.add(l.toLowerCase()))
+          known[l.toLowerCase()] ?? l,
+    ];
+    setState(() {
+      _labels.addAll(added);
+      if (color != null) {
+        for (final l in added) {
+          if (!known.containsKey(l.toLowerCase())) {
+            _newLabelColors[l.toLowerCase()] = color;
+          }
+        }
+      }
+    });
+    _labelInput.clear();
+    _labelFocus.requestFocus();
   }
 
   /// Picks the card image, replacing the current one.
@@ -268,28 +391,29 @@ class _TaskEditorState extends State<TaskEditor> {
 
   void _save() {
     if (!_canSave) return;
-    if (_tagInput.text.trim().isNotEmpty) _addTags(_tagInput.text);
+    if (_labelInput.text.trim().isNotEmpty) _addLabels(_labelInput.text);
     final repo = widget.repo;
     final title = _title.text.trim();
-    final description = _description.text.trim();
+    final description = _description.toMarkdown().trim();
     final subtasks = _editedSubtasks();
     if (_isNew) {
       final created = repo.create(
         title: title,
         description: description,
         status: _status,
-        tags: _tags,
+        tags: _labels,
         images: _images,
         originId: _originId,
         multiHomes: _validMultiHomes,
         dueDate: _dueDate,
         dueTime: _dueTime,
         subtasks: subtasks,
-        assigneeId: _assigneeId,
+        assigneeId: _assignee,
       );
       if (_completed) repo.save(created.withCompleted(_originId, true));
+      _task = repo.get(created.id) ?? created;
     } else {
-      final task = widget.task!;
+      final task = _task!;
       // Images removed in the editor are deleted only once the change is saved.
       task.images.where((i) => !_images.contains(i)).forEach(repo.deleteImage);
       repo.setMultiHomes(task.id, _validMultiHomes);
@@ -303,30 +427,43 @@ class _TaskEditorState extends State<TaskEditor> {
             .copyWith(
               title: title,
               description: description,
-              tags: _tags,
+              tags: _labels,
               images: _images,
               dueDate: _dueDate,
               dueTime: _dueDate == null ? null : _dueTime,
               subtasks: subtasks,
-              assigneeId: _assigneeId,
+              assigneeId: _assignee,
             )
             .withCompleted(widget.projectId, _completed),
       );
+      _task = repo.get(task.id) ?? _task;
     }
-    // Picked and then removed again before saving.
+    // Kept on the project, to suggest on its other tasks.
+    for (final id in {_originId, widget.projectId}) {
+      widget.projectRepo?.addLabels(id, _labels, colors: _newLabelColors);
+    }
+    // Picked and then removed again before saving; the rest are saved.
     _added.where((i) => !_images.contains(i)).forEach(repo.deleteImage);
-    _saved = true;
-    Navigator.pop(context);
+    _added.clear();
+    // Stays open: only the arrow, Escape or clicking outside closes it.
+    _savedTimer?.cancel();
+    setState(() {
+      _justSaved = true;
+      _savedSnapshot = _snapshot();
+    });
+    _savedTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _justSaved = false);
+    });
   }
 
   /// Copies the task as saved (not the edits here, which stay open to
   /// save), just below it; Undo deletes the copy.
   Future<void> _duplicate() async {
-    final copy = await widget.repo.duplicate(widget.task!.id);
+    final copy = await widget.repo.duplicate(_task!.id);
     if (copy == null || !mounted) return;
     showUndoSnackBar(
       context,
-      'Duplicated "${widget.task!.title}"',
+      'Duplicated "${_task!.title}"',
       onUndo: () => widget.repo.delete(copy.id),
     );
   }
@@ -354,6 +491,8 @@ class _TaskEditorState extends State<TaskEditor> {
     return LeftMenuButton<VoidCallback>(
       tooltip: 'Task options',
       iconSize: 18,
+      // A square the height of Mark complete, like the close arrow.
+      buttonSize: _chipHeight,
       icon: Icon(Symbols.more_horiz),
       onSelected: (action) => action(),
       constraints: const BoxConstraints(minWidth: 180),
@@ -373,12 +512,37 @@ class _TaskEditorState extends State<TaskEditor> {
   /// Closes without saving edits, then deletes the task as it was saved.
   void _delete() {
     Navigator.pop(context);
-    widget.onDelete!(widget.task!);
+    widget.onDelete!(widget.repo.get(_task!.id) ?? _task!);
   }
 
   @override
   Widget build(BuildContext context) {
-    return _panel();
+    final editing = _editingLabels;
+    // Always a Stack, so opening the labels doesn't rebuild the form (and
+    // lose its scroll position). They open over the form only, not the
+    // rest of the app.
+    return SizedBox(
+      width: taskEditorWidth,
+      child: Stack(
+        children: [
+          _panel(),
+          if (editing != null)
+            Positioned.fill(
+              child: LabelsSheet(
+                labels: editing,
+                changes: _labelChanges,
+                projectName:
+                    widget.projects
+                        .where((p) => p.id == _originId)
+                        .firstOrNull
+                        ?.name ??
+                    'this project',
+                onClose: _closeLabels,
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   // A full-height panel on the right: no shadow, just a left edge in the
@@ -401,7 +565,8 @@ class _TaskEditorState extends State<TaskEditor> {
               // corner, with a line below separating it from the form. Same
               // space above and below the button.
               Container(
-                padding: const EdgeInsets.fromLTRB(24, _gap, 16, _gap),
+                // The same space above and below as the footer.
+                padding: const EdgeInsets.fromLTRB(24, 12, 16, 12),
                 decoration: BoxDecoration(
                   border: Border(
                     bottom: BorderSide(color: context.colors.formBorder),
@@ -451,7 +616,7 @@ class _TaskEditorState extends State<TaskEditor> {
                               ],
                               style: const TextStyle(
                                 fontSize: 20,
-                                fontWeight: FontWeight.w600,
+                                fontWeight: FontWeight.w400,
                               ),
                               decoration: InputDecoration(
                                 // No inner padding, so the gap above the title is
@@ -461,7 +626,7 @@ class _TaskEditorState extends State<TaskEditor> {
                                 hintText: 'Task title',
                                 hintStyle: TextStyle(
                                   fontSize: 20,
-                                  fontWeight: FontWeight.w600,
+                                  fontWeight: FontWeight.w400,
                                   color: context.colors.placeholder,
                                 ),
                                 border: InputBorder.none,
@@ -483,9 +648,24 @@ class _TaskEditorState extends State<TaskEditor> {
                               }),
                             ),
                           ),
+                          // Where it was created, when it's opened from
+                          // another project it's multi-homed in.
+                          if (_originProject case final origin?
+                              when _originId != widget.projectId)
+                            _section(
+                              'Task origin',
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: _projectChip(origin),
+                              ),
+                            ),
                           if (_otherProjects.isNotEmpty)
-                            _section('Projects', _multiHomePicker()),
-                          _section('Tags', _tagEditor()),
+                            _section('Multi-home task', _multiHomePicker()),
+                          _section(
+                            'Labels',
+                            _labelEditor(),
+                            action: _labelsButton(),
+                          ),
                           _section(
                             'Card image',
                             SizedBox(
@@ -495,28 +675,11 @@ class _TaskEditorState extends State<TaskEditor> {
                           ),
                           _section(
                             'Description',
-                            TextField(
-                              // Never scrolls (or bounces) on its own: a swipe over it
-                              // scrolls the form instead.
-                              scrollPhysics:
-                                  const NeverScrollableScrollPhysics(),
+                            RichTextEditor(
                               controller: _description,
                               // The same size as the section labels.
-                              style: const TextStyle(
-                                fontSize: _descriptionFontSize,
-                              ),
-                              // Grows with its text rather than scrolling inside.
-                              minLines: 6,
-                              maxLines: null,
-                              decoration: InputDecoration(
-                                hintText: 'Add more detail…',
-                                hintStyle: TextStyle(
-                                  fontSize: _descriptionFontSize,
-                                  color: context.colors.placeholder,
-                                ),
-                                enabledBorder: context.colors.fieldBorder,
-                                border: context.colors.fieldBorder,
-                              ),
+                              fontSize: _descriptionFontSize,
+                              hintText: 'Add more detail…',
                             ),
                           ),
                           _section('Subtasks', _subtaskEditor()),
@@ -538,17 +701,35 @@ class _TaskEditorState extends State<TaskEditor> {
                 child: Row(
                   spacing: 8,
                   children: [
-                    // Closes without saving (like Escape or clicking
-                    // outside).
-                    IconButton(
-                      tooltip: 'Close without saving',
-                      onPressed: () => Navigator.pop(context),
-                      icon: Icon(Symbols.arrow_back, size: 20),
-                    ),
+                    // Closes, dropping unsaved edits (like Escape or
+                    // clicking outside). Save doesn't close.
+                    FormCloseButton(onPressed: () => Navigator.pop(context)),
                     const Spacer(),
+                    AnimatedOpacity(
+                      opacity: _justSaved ? 1 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Row(
+                        spacing: 4,
+                        children: [
+                          Icon(
+                            Symbols.check,
+                            size: 16,
+                            color: context.colors.mutedText,
+                          ),
+                          Text(
+                            'Saved',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: context.colors.mutedText,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     FilledButton(
+                      style: _chipSizedButton,
                       onPressed: _canSave ? _save : null,
-                      child: Text(_isNew ? 'Create task' : 'Save'),
+                      child: Text(_isNew ? 'Create task' : 'Save changes'),
                     ),
                   ],
                 ),
@@ -560,21 +741,93 @@ class _TaskEditorState extends State<TaskEditor> {
     );
   }
 
-  Widget _section(String label, Widget child) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    spacing: 8,
-    children: [
-      Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: context.colors.text,
-        ),
+  Widget _section(String label, Widget child, {Widget? action}) {
+    final heading = Text(
+      label,
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w400,
+        color: context.colors.text,
       ),
-      child,
-    ],
-  );
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: 8,
+      children: [
+        if (action == null)
+          heading
+        else
+          // The action sits just after the heading, without making the
+          // heading row taller than the others.
+          SizedBox(
+            height: 16,
+            child: Row(
+              spacing: 4,
+              children: [
+                heading,
+                SizedBox(
+                  width: 24,
+                  child: OverflowBox(maxHeight: 24, child: action),
+                ),
+              ],
+            ),
+          ),
+        child,
+      ],
+    );
+  }
+
+  /// The pencil by the Labels heading (once the task has labels): opens
+  /// the project's labels, over the form.
+  Widget? _labelsButton() {
+    final projectRepo = widget.projectRepo;
+    if (_labels.isEmpty || projectRepo == null) return null;
+    return IconButton(
+      tooltip: 'Edit labels',
+      iconSize: 15,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+      style: IconButton.styleFrom(
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: () => _openLabels(projectRepo),
+      icon: Icon(Symbols.edit),
+    );
+  }
+
+  /// The project's labels being edited over the form; null when closed.
+  ProjectLabels? _editingLabels;
+  LabelChanges _labelChanges = LabelChanges();
+
+  void _openLabels(ProjectRepository projectRepo) {
+    // Labels picked here but not saved yet are on the project too, so
+    // they can be edited.
+    projectRepo.addLabels(_originId, _labels, colors: _newLabelColors);
+    setState(() {
+      _labelChanges = LabelChanges();
+      _editingLabels = ProjectLabels(projectRepo, widget.repo, _originId);
+    });
+  }
+
+  /// Closes the labels; the form's own labels follow what changed
+  /// (without counting as an unsaved change: the task was saved with it).
+  void _closeLabels() {
+    final changes = _labelChanges;
+    final wasDirty = _isDirty;
+    setState(() {
+      _editingLabels = null;
+      if (changes.isEmpty) return;
+      final updated = changes.applyTo(_labels);
+      _labels
+        ..clear()
+        ..addAll(updated);
+      _newLabelColors.removeWhere(
+        (key, _) =>
+            changes.deleted.contains(key) || changes.renamed.containsKey(key),
+      );
+      if (!wasDirty) _savedSnapshot = _snapshot();
+    });
+  }
 
   /// Checks the task off (or unchecks it) on this board. It doesn't change
   /// its column. Saved with Save, like every change here.
@@ -584,38 +837,21 @@ class _TaskEditorState extends State<TaskEditor> {
         ? null
         : () => setState(() => _completed = !_completed);
     const green = Color(0xFF34C759);
-    // Rounded rectangle (not a pill), no icon, equal padding all round.
-    const padding = EdgeInsets.all(10);
-    return _completed
-        ? FilledButton(
-            onPressed: toggle,
-            style: FilledButton.styleFrom(
-              backgroundColor: green,
-              foregroundColor: Colors.white,
-              shape: formShape,
-              padding: padding,
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: const Text('Completed'),
-          )
-        : OutlinedButton(
-            onPressed: toggle,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: context.colors.text,
-              disabledForegroundColor: context.colors.placeholder,
-              side: BorderSide(
-                color: toggle == null
-                    ? context.colors.cardBorder
-                    : context.colors.formBorder,
+    // The same button as Save changes (the theme's filled button); green
+    // once completed.
+    return FilledButton(
+      onPressed: toggle,
+      style: _completed
+          ? _chipSizedButton.merge(
+              FilledButton.styleFrom(
+                backgroundColor: green,
+                // The near-black of the label text, not white.
+                foregroundColor: labelText(green),
               ),
-              shape: formShape,
-              padding: padding,
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: const Text('Mark complete'),
-          );
+            )
+          : _chipSizedButton,
+      child: Text(_completed ? 'Completed' : 'Mark complete'),
+    );
   }
 
   /// Every project except the task's origin.
@@ -638,7 +874,28 @@ class _TaskEditorState extends State<TaskEditor> {
     _projectFocus.requestFocus();
   }
 
-  /// Like the tags: the projects the task is also in, as chips (✕ takes it
+  /// The project the task was created in.
+  Project? get _originProject =>
+      widget.projects.where((p) => p.id == _originId).firstOrNull;
+
+  /// A project as a chip, styled like the project labels on cards and
+  /// list rows: its mark, white text, a plain outline. With [onDeleted],
+  /// a ✕ takes it off; without, it's read-only.
+  Widget _projectChip(Project p, {VoidCallback? onDeleted}) => InputChip(
+    label: Text(
+      p.name,
+      style: TextStyle(fontSize: _chipFontSize, color: context.colors.text),
+    ),
+    avatar: ProjectIcon(project: p, size: 14),
+    backgroundColor: context.colors.card,
+    side: BorderSide(color: context.colors.formBorder),
+    deleteIcon: Icon(Symbols.close, size: 14, color: context.colors.text),
+    // An empty message means no tooltip on the ✕.
+    deleteButtonTooltipMessage: '',
+    onDeleted: onDeleted,
+  );
+
+  /// Like the labels: the projects the task is also in, as chips (✕ takes it
   /// back out), then an "Add project" box that suggests matching projects
   /// it isn't in yet as you type. Enter adds the highlighted one.
   Widget _multiHomePicker() {
@@ -660,24 +917,8 @@ class _TaskEditorState extends State<TaskEditor> {
               for (final p in added)
                 // Styled like the project labels on cards and list rows:
                 // the project's dot, white text, a plain outline.
-                InputChip(
-                  label: Text(
-                    p.name,
-                    style: TextStyle(
-                      fontSize: _chipFontSize,
-                      color: context.colors.text,
-                    ),
-                  ),
-                  avatar: Icon(Icons.circle, size: 10, color: p.color),
-                  backgroundColor: context.colors.card,
-                  side: BorderSide(color: context.colors.formBorder),
-                  deleteIcon: Icon(
-                    Symbols.close,
-                    size: 14,
-                    color: context.colors.text,
-                  ),
-                  // An empty message means no tooltip on the ✕.
-                  deleteButtonTooltipMessage: '',
+                _projectChip(
+                  p,
                   onDeleted: () => setState(() => _multiHomes.remove(p.id)),
                 ),
             ],
@@ -742,7 +983,7 @@ class _TaskEditorState extends State<TaskEditor> {
                               child: Row(
                                 spacing: 8,
                                 children: [
-                                  Icon(Icons.circle, size: 10, color: p.color),
+                                  ProjectIcon(project: p, size: 14),
                                   Flexible(
                                     child: Text(
                                       p.name,
@@ -786,7 +1027,7 @@ class _TaskEditorState extends State<TaskEditor> {
       isExpanded: true,
       borderRadius: formRadius,
       dropdownColor: context.colors.surface,
-      // The same size as the tag and project chips.
+      // The same size as the label and project chips.
       style: TextStyle(fontSize: _chipFontSize, color: context.colors.text),
       icon: Icon(Symbols.expand_more, size: 16),
       decoration: InputDecoration(
@@ -804,15 +1045,17 @@ class _TaskEditorState extends State<TaskEditor> {
   );
 
   /// Who it's assigned to: Unassigned, or any profile (avatar and name).
-  /// Styled like the Column picker.
+  /// Styled like the Column picker. Locked (grayed out) on a personal
+  /// task: it's always its owner's.
   Widget _assigneePicker(ProfilesScope scope) {
+    final locked = _personalOwner != null;
     final style = TextStyle(
       fontSize: _chipFontSize,
       color: context.colors.text,
     );
     // A deleted profile shows as Unassigned until another is picked.
-    final current = scope.find(_assigneeId)?.id;
-    return SizedBox(
+    final current = scope.find(_assignee)?.id;
+    final picker = SizedBox(
       width: _pickerWidth,
       child: DropdownButtonFormField<String?>(
         // Rebuilt when the profiles change, so the selection stays valid.
@@ -824,10 +1067,12 @@ class _TaskEditorState extends State<TaskEditor> {
         dropdownColor: context.colors.surface,
         style: style,
         icon: Icon(Symbols.expand_more, size: 16),
+        iconDisabledColor: context.colors.placeholder,
         decoration: InputDecoration(
           isDense: true,
           contentPadding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
           enabledBorder: context.colors.fieldBorder,
+          disabledBorder: context.colors.fieldBorder,
           border: context.colors.fieldBorder,
         ),
         items: [
@@ -862,63 +1107,50 @@ class _TaskEditorState extends State<TaskEditor> {
               ),
             ),
         ],
-        onChanged: (id) => setState(() => _assigneeId = id),
+        onChanged: locked ? null : (id) => setState(() => _assigneeId = id),
       ),
+    );
+    if (!locked) return picker;
+    return Tooltip(
+      message: 'Tasks in a personal project are assigned to its owner',
+      child: Opacity(opacity: 0.6, child: picker),
     );
   }
 
-  /// A tag in the form: the same chip (size, padding, ✕) as the projects
-  /// above, in the tag's own color like on the card.
-  Widget _tagChip(String tag) {
-    final color = TagChip.colorFor(tag);
-    final fill = Color.lerp(context.colors.card, color, 0.22)!;
-    final text = context.colors.chipText(color);
-    return InputChip(
-      label: Text(
-        tag,
-        style: TextStyle(fontSize: _chipFontSize, color: text),
-      ),
-      backgroundColor: fill,
-      // Same width border as the project chips, so they're the same size.
-      side: BorderSide(color: fill),
-      deleteIcon: Icon(Symbols.close, size: 14, color: text),
-      deleteButtonTooltipMessage: '',
-      onDeleted: () => setState(() => _tags.remove(tag)),
-    );
-  }
+  /// A label in the form: the same chip as on the cards (its padding and
+  /// color), with a ✕ to take it off.
+  Widget _labelChip(String label) => LabelChip(
+    label,
+    // A label picked here but not saved yet: the color picked for it.
+    color: switch (_newLabelColors[label.toLowerCase()]) {
+      final picked? => labelPalette[picked],
+      null => null,
+    },
+    onDeleted: () => setState(() {
+      _labels.remove(label);
+      _newLabelColors.remove(label.toLowerCase());
+    }),
+  );
 
-  /// The tags as chips, then the field on its own line underneath (like
-  /// the projects).
-  Widget _tagEditor() => Column(
+  /// The labels as chips, then the field on its own line underneath (like
+  /// the projects). Focused, it lists the project's labels not on the
+  /// task yet (see [LabelField]).
+  Widget _labelEditor() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     spacing: 6,
     children: [
-      if (_tags.isNotEmpty)
+      if (_labels.isNotEmpty)
         Wrap(
           spacing: 6,
           runSpacing: 6,
-          children: [for (final tag in _tags) _tagChip(tag)],
+          children: [for (final label in _labels) _labelChip(label)],
         ),
-      SizedBox(
-        width: 160,
-        child: TextField(
-          // Never scrolls (or bounces) on its own: a swipe over it
-          // scrolls the form instead.
-          scrollPhysics: const NeverScrollableScrollPhysics(),
-          controller: _tagInput,
-          focusNode: _tagFocus,
-          style: const TextStyle(fontSize: 13),
-          decoration: InputDecoration(
-            isDense: true,
-            hintText: 'Add tag, press Enter',
-            hintStyle: TextStyle(color: context.colors.placeholder),
-            border: InputBorder.none,
-          ),
-          onSubmitted: _addTags,
-          onChanged: (v) {
-            if (v.contains(',')) _addTags(v);
-          },
-        ),
+      LabelField(
+        controller: _labelInput,
+        focusNode: _labelFocus,
+        options: (text) =>
+            labelOptions(text, known: _knownLabels, chosen: _labels),
+        onAdd: _addLabels,
       ),
     ],
   );

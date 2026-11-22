@@ -5,8 +5,8 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'app_theme.dart';
 import 'sync/sync_service.dart';
 
-/// Small title-bar icon showing whether local data has reached the
-/// server; hover it for the details.
+/// Small icon next to Settings (at the bottom of the sidebar) showing
+/// whether local data has reached the server; hover it for the details.
 class SyncStatusIndicator extends StatelessWidget {
   const SyncStatusIndicator({super.key, required this.sync});
 

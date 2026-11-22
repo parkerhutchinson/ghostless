@@ -7,10 +7,13 @@ import '../app_theme.dart';
 import '../profiles/profile_avatar.dart';
 import '../profiles/profiles_scope.dart';
 import '../projects/project.dart';
+import '../projects/project_repository.dart';
+import '../projects/project_logo.dart';
 import '../tasks/due_date.dart';
 import '../tasks/task.dart';
 import '../tasks/task_editor.dart';
 import '../tasks/task_repository.dart';
+import '../widgets/frosted_bar.dart';
 import 'activity.dart';
 import 'activity_repository.dart';
 
@@ -24,7 +27,11 @@ class ActivityPage extends StatefulWidget {
     required this.tasks,
     required this.profileId,
     required this.projects,
+    this.projectRepo,
   });
+
+  /// Where labels are kept, for the task form.
+  final ProjectRepository? projectRepo;
 
   final ActivityRepository activity;
   final TaskRepository tasks;
@@ -97,27 +104,51 @@ class _ActivityPageState extends State<ActivityPage> {
       task: task,
       projectId: board,
       projects: widget.projects,
+      projectRepo: widget.projectRepo,
     );
   }
 
+  // Notifications, not work: dismissing one (or all) needs no undo.
+  void _dismiss(Activity a) => widget.activity.dismiss(a.id);
+
+  void _clearAll() => widget.activity.dismissAll(widget.profileId);
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Padding(
-          // Lines up with a project's title.
-          padding: EdgeInsets.fromLTRB(24, 12, 24, 16),
-          child: Text(
-            'Activity',
-            style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
+    return StreamBuilder<List<Activity>>(
+      stream: _stream,
+      initialData: widget.activity.current(widget.profileId),
+      builder: (context, snap) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Frosted glass, like a project's header.
+          FrostedBar(
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Activity',
+                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                if (snap.requireData.isNotEmpty)
+                  OutlinedButton.icon(
+                    onPressed: _clearAll,
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      foregroundColor: context.colors.text,
+                      // The background color, so it reads over an image.
+                      backgroundColor: context.colors.surface,
+                      side: BorderSide(color: context.colors.cardBorder),
+                    ),
+                    icon: const Icon(Symbols.clear_all, size: 18),
+                    label: const Text('Clear all'),
+                  ),
+              ],
+            ),
           ),
-        ),
-        Expanded(
-          child: StreamBuilder<List<Activity>>(
-            stream: _stream,
-            initialData: widget.activity.current(widget.profileId),
-            builder: (context, snap) => StreamBuilder<List<Task>>(
+          Expanded(
+            child: StreamBuilder<List<Task>>(
               stream: _tasks,
               initialData: widget.tasks.current(),
               builder: (context, taskSnap) => _list(context, snap.requireData, {
@@ -125,8 +156,8 @@ class _ActivityPageState extends State<ActivityPage> {
               }),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -153,6 +184,7 @@ class _ActivityPageState extends State<ActivityPage> {
           fresh: _fresh.contains(a.id),
           projects: widget.projects,
           onOpen: task == null ? null : () => _open(task),
+          onDismiss: () => _dismiss(a),
         ),
       );
     }
@@ -215,6 +247,7 @@ class _ActivityRow extends StatelessWidget {
     required this.fresh,
     required this.projects,
     required this.onOpen,
+    required this.onDismiss,
   });
 
   final Activity activity;
@@ -227,13 +260,16 @@ class _ActivityRow extends StatelessWidget {
   final List<Project> projects;
   final VoidCallback? onOpen;
 
+  /// The ✕: hides it.
+  final VoidCallback onDismiss;
+
   @override
   Widget build(BuildContext context) {
     final scope = ProfilesScope.maybeOf(context);
     final actor = scope?.find(activity.actorId);
     final name = actor?.displayName ?? 'Someone';
     final title = task?.title ?? activity.taskTitle;
-    const bold = TextStyle(fontWeight: FontWeight.w600);
+    const bold = TextStyle(fontWeight: FontWeight.w400);
     final taskSpan = TextSpan(
       text: title.isEmpty ? 'Untitled task' : title,
       style: bold.copyWith(
@@ -277,102 +313,121 @@ class _ActivityRow extends StatelessWidget {
     final muted = context.colors.mutedText;
     final when = activity.createdAt.toLocal();
 
-    return Material(
-      color: Colors.transparent,
-      shape: formShape,
-      child: InkWell(
-        onTap: onOpen,
-        customBorder: formShape,
-        hoverColor: context.colors.hover,
-        mouseCursor: onOpen == null
-            ? SystemMouseCursors.basic
-            : SystemMouseCursors.click,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            spacing: 12,
-            children: [
-              // Reminders: a calendar or alarm where a person's avatar goes.
-              if (activity.kind.isReminder)
-                SizedBox.square(
-                  dimension: 28,
-                  child: Icon(
-                    activity.kind == ActivityKind.overdue
-                        ? Symbols.alarm
-                        : Symbols.event,
-                    size: 22,
-                  ),
-                )
-              else if (actor != null)
-                ProfileAvatar(
-                  profile: actor,
-                  image: scope?.imageOf(actor),
-                  size: 28,
-                )
-              else
-                Icon(Symbols.account_circle, size: 28, color: muted),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  spacing: 3,
-                  children: [
-                    Text.rich(
-                      TextSpan(
-                        style: TextStyle(fontSize: 13.5, color: text),
-                        children: sentence,
-                      ),
+    // Each row on the background color, a few px apart, so it reads over a
+    // background image.
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: context.colors.surface,
+        shape: formShape,
+        child: InkWell(
+          onTap: onOpen,
+          customBorder: formShape,
+          hoverColor: context.colors.hover,
+          mouseCursor: onOpen == null
+              ? SystemMouseCursors.basic
+              : SystemMouseCursors.click,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: 12,
+              children: [
+                // Reminders: a calendar or alarm where a person's avatar goes.
+                if (activity.kind.isReminder)
+                  SizedBox.square(
+                    dimension: 28,
+                    child: Icon(
+                      activity.kind == ActivityKind.overdue
+                          ? Symbols.alarm
+                          : Symbols.event,
+                      size: 22,
                     ),
-                    for (final d in details)
-                      if (d.isNotEmpty)
-                        Text(d, style: TextStyle(fontSize: 12.5, color: muted)),
-                    if (project != null)
-                      Row(
-                        spacing: 6,
-                        children: [
-                          Icon(Icons.circle, size: 8, color: project.color),
-                          Flexible(
-                            child: Text(
-                              project.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12, color: muted),
-                            ),
+                  )
+                else if (actor != null)
+                  ProfileAvatar(
+                    profile: actor,
+                    image: scope?.imageOf(actor),
+                    size: 28,
+                  )
+                else
+                  Icon(Symbols.account_circle, size: 28, color: muted),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    spacing: 3,
+                    children: [
+                      Text.rich(
+                        TextSpan(
+                          style: TextStyle(fontSize: 13.5, color: text),
+                          children: sentence,
+                        ),
+                      ),
+                      for (final d in details)
+                        if (d.isNotEmpty)
+                          Text(
+                            d,
+                            style: TextStyle(fontSize: 12.5, color: muted),
                           ),
-                        ],
-                      ),
-                  ],
+                      if (project != null)
+                        Row(
+                          spacing: 6,
+                          children: [
+                            ProjectIcon(project: project, size: 12),
+                            Flexible(
+                              child: Text(
+                                project.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 12, color: muted),
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  spacing: 8,
-                  children: [
-                    Text(
-                      formatTime(when.hour * 60 + when.minute),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: muted,
-                        fontFeatures: const [FontFeature.tabularFigures()],
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    spacing: 8,
+                    children: [
+                      Text(
+                        formatTime(when.hour * 60 + when.minute),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: muted,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
                       ),
-                    ),
-                    // Unread: a dot in the accent color.
-                    SizedBox(
-                      width: 8,
-                      child: fresh
-                          ? Icon(
-                              Icons.circle,
-                              size: 8,
-                              color: Theme.of(context).colorScheme.primary,
-                            )
-                          : null,
-                    ),
-                  ],
+                      // Unread: a dot in the accent color.
+                      SizedBox(
+                        width: 8,
+                        child: fresh
+                            ? Icon(
+                                Icons.circle,
+                                size: 8,
+                                color: Theme.of(context).colorScheme.primary,
+                              )
+                            : null,
+                      ),
+                      // Dismiss (above the row's tap: it doesn't open it).
+                      SizedBox.square(
+                        dimension: 22,
+                        child: IconButton(
+                          onPressed: onDismiss,
+                          tooltip: 'Dismiss',
+                          padding: EdgeInsets.zero,
+                          iconSize: 16,
+                          icon: Icon(Symbols.close, color: muted),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -398,7 +453,7 @@ class _Empty extends StatelessWidget {
           ),
           const Text(
             'No activity yet',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w400),
           ),
           Text(
             'When someone assigns you a task or changes one that’s '

@@ -1,0 +1,45 @@
+import 'package:material_ui/material_ui.dart';
+import 'package:material_symbols_icons/symbols.dart';
+
+/// Text size of the task form's chips (labels, projects).
+const formChipFontSize = 12.5;
+
+/// Height of the task form's chips, and of its buttons.
+const formChipHeight = 32.0;
+
+/// The task form's buttons (Mark complete, Save changes, the labels'
+/// Save): the size of its chips (their height and text size).
+final formButtonStyle = FilledButton.styleFrom(
+  textStyle: const TextStyle(
+    fontSize: formChipFontSize,
+    fontWeight: FontWeight.w400,
+  ),
+  padding: const EdgeInsets.symmetric(horizontal: 12),
+  minimumSize: const Size(0, formChipHeight),
+  fixedSize: const Size.fromHeight(formChipHeight),
+  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  visualDensity: VisualDensity.standard,
+);
+
+/// The ← that closes a form without saving: a square the height of
+/// [formButtonStyle]'s buttons.
+class FormCloseButton extends StatelessWidget {
+  const FormCloseButton({super.key, required this.onPressed});
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: 'Close',
+    onPressed: onPressed,
+    iconSize: 18,
+    padding: EdgeInsets.zero,
+    constraints: const BoxConstraints.tightFor(
+      width: formChipHeight,
+      height: formChipHeight,
+    ),
+    style: IconButton.styleFrom(
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+    icon: Icon(Symbols.arrow_back),
+  );
+}

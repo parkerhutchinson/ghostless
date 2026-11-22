@@ -5,10 +5,10 @@ import 'app_schema.dart';
 /// Fields the app sometimes leaves empty (null): a database must allow
 /// that.
 const optionalFields = <String, Set<String>>{
-  'projects': {'ownerId'},
+  'projects': {'ownerId', 'logo'},
   'tasks': {'dueDate', 'dueTime', 'assigneeId'},
   'profiles': {'imageFile', 'personalProjectId'},
-  'activity': {'actorId', 'dueAt', 'readAt'},
+  'activity': {'actorId', 'dueAt', 'readAt', 'dismissedAt'},
 };
 
 enum CheckLevel { passed, warning, error }

@@ -3,8 +3,10 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../profiles/profiles_scope.dart';
 import '../projects/project.dart';
+import '../projects/project_logo.dart';
 import '../app_theme.dart';
 import 'due_date.dart';
+import 'label_colors.dart';
 import 'task.dart';
 import 'task_repository.dart';
 import '../widgets/left_menu_button.dart';
@@ -34,7 +36,12 @@ class TaskCard extends StatefulWidget {
     this.subtasksExpanded = false,
     this.onToggleSubtasks,
     this.lifted = false,
+    this.showAssignee = true,
   });
+
+  /// Shows the assignee's avatar. Off on a personal project, where every
+  /// task is its owner's.
+  final bool showAssignee;
 
   /// Its subtasks are shown. They start collapsed: a toggle after the
   /// title (like the list view's) shows them.
@@ -82,8 +89,8 @@ class _TaskCardState extends State<TaskCard> {
       color: context.colors.card,
       elevation: lifted ? 12 : 0,
       shadowColor: Colors.black,
+      // Square: task cards have no rounded corners.
       shape: RoundedRectangleBorder(
-        borderRadius: formRadius,
         side: BorderSide(color: context.colors.cardBorder),
       ),
       clipBehavior: Clip.antiAlias,
@@ -120,6 +127,7 @@ class _TaskCardState extends State<TaskCard> {
                 onToggleCompleted: widget.onToggleCompleted,
                 onToggleSubtask: widget.onToggleSubtask,
                 onAssign: widget.onAssign,
+                showAssignee: widget.showAssignee,
                 subtasksExpanded: widget.subtasksExpanded,
                 onToggleSubtasks: widget.onToggleSubtasks,
               ),
@@ -201,16 +209,20 @@ abstract final class TaskTable {
 
   /// The column names, in a bordered box, fixed above the list. "Title"
   /// starts at the far left: the checkbox is part of the title column.
-  static Widget header(BuildContext context) {
+  /// Without the Assignee column ([showAssignee] off) on a personal
+  /// project, like its rows.
+  static Widget header(BuildContext context, {bool showAssignee = true}) {
     final style = TextStyle(
       fontSize: 11,
       fontWeight: FontWeight.w600,
       color: context.colors.text,
     );
     // A DecoratedBox (not a Container), so the 1px border doesn't push the
-    // labels out of line with the rows' columns.
+    // labels out of line with the rows' columns. On the background color,
+    // so it reads over a background image.
     return DecoratedBox(
       decoration: BoxDecoration(
+        color: context.colors.surface,
         border: Border.all(color: context.colors.cardBorder),
       ),
       child: Padding(
@@ -223,17 +235,18 @@ abstract final class TaskTable {
                 flex: titleFlex,
                 child: Text('Title', style: style),
               ),
-              Expanded(
-                flex: assigneeFlex,
-                child: Text('Assignee', style: style),
-              ),
+              if (showAssignee)
+                Expanded(
+                  flex: assigneeFlex,
+                  child: Text('Assignee', style: style),
+                ),
               Expanded(
                 flex: dueFlex,
                 child: Text('Due', style: style),
               ),
               Expanded(
                 flex: tagsFlex,
-                child: Text('Tags', style: style),
+                child: Text('Labels', style: style),
               ),
               Expanded(
                 flex: projectsFlex,
@@ -264,10 +277,15 @@ class TaskRow extends StatefulWidget {
     this.expanded = false,
     this.onToggleExpanded,
     this.onAssign,
+    this.showAssignee = true,
   });
 
   /// Assigns the task to a profile (null: nobody), from the Assignee cell.
   final ValueChanged<String?>? onAssign;
+
+  /// Has an Assignee cell. Off on a personal project, where every task is
+  /// its owner's.
+  final bool showAssignee;
 
   final Task task;
   final VoidCallback? onOpen;
@@ -350,7 +368,7 @@ class _TaskRowState extends State<TaskRow> {
                                 task.title,
                                 style: TextStyle(
                                   fontSize: 13.5,
-                                  fontWeight: FontWeight.w600,
+                                  fontWeight: FontWeight.w400,
                                   color: completed
                                       ? context.colors.mutedText
                                       : null,
@@ -371,13 +389,14 @@ class _TaskRowState extends State<TaskRow> {
                         ],
                       ),
                     ),
-                    Expanded(
-                      flex: TaskTable.assigneeFlex,
-                      child: _AssigneeLabel(
-                        assigneeId: task.assigneeId,
-                        onChanged: widget.onAssign,
+                    if (widget.showAssignee)
+                      Expanded(
+                        flex: TaskTable.assigneeFlex,
+                        child: _AssigneeLabel(
+                          assigneeId: task.assigneeId,
+                          onChanged: widget.onAssign,
+                        ),
                       ),
-                    ),
                     // A date too long for the column ends in "…".
                     Expanded(
                       flex: TaskTable.dueFlex,
@@ -396,7 +415,9 @@ class _TaskRowState extends State<TaskRow> {
                         child: Wrap(
                           spacing: 4,
                           runSpacing: 4,
-                          children: [for (final tag in task.tags) TagChip(tag)],
+                          children: [
+                            for (final tag in task.tags) LabelChip(tag),
+                          ],
                         ),
                       ),
                     ),
@@ -514,10 +535,12 @@ class _Body extends StatelessWidget {
     this.onToggleCompleted,
     this.onToggleSubtask,
     this.onAssign,
+    this.showAssignee = true,
     this.subtasksExpanded = false,
     this.onToggleSubtasks,
   });
   final Task task;
+  final bool showAssignee;
   final bool subtasksExpanded;
   final VoidCallback? onToggleSubtasks;
   final bool completed;
@@ -551,7 +574,7 @@ class _Body extends StatelessWidget {
                 text: task.title,
                 style: TextStyle(
                   fontSize: 14,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w400,
                   height: 1.4,
                   color: completed ? context.colors.mutedText : null,
                   decoration: completed ? TextDecoration.lineThrough : null,
@@ -598,15 +621,20 @@ class _Body extends StatelessWidget {
           Wrap(
             spacing: 4,
             runSpacing: 4,
-            children: [for (final tag in task.tags) TagChip(tag)],
+            children: [for (final tag in task.tags) LabelChip(tag)],
           ),
         // Last, under everything else: the assignee at the left (a
         // button that opens a menu of every profile), the due date at the
         // right.
-        if (task.dueDate != null || task.assigneeId != null || onAssign != null)
+        if (task.dueDate != null ||
+            (showAssignee && (task.assigneeId != null || onAssign != null)))
           Row(
             children: [
-              AssigneeButton(assigneeId: task.assigneeId, onChanged: onAssign),
+              if (showAssignee)
+                AssigneeButton(
+                  assigneeId: task.assigneeId,
+                  onChanged: onAssign,
+                ),
               // All the room after the avatar, so a long date only ends
               // in "…" when it truly doesn't fit.
               Expanded(
@@ -717,7 +745,7 @@ class _MultiHomeLabel extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         spacing: 4,
         children: [
-          Icon(Icons.circle, size: 7, color: project.color),
+          ProjectIcon(project: project, size: 12),
           // A long name is cut short instead of overflowing the card.
           Flexible(
             child: Text(
@@ -797,35 +825,21 @@ class DoneButton extends StatelessWidget {
   }
 }
 
-/// A small colored tag. The color is derived from the text, so a tag looks
-/// the same everywhere.
-class TagChip extends StatelessWidget {
-  const TagChip(this.tag, {super.key, this.onDeleted});
+/// A small colored label, in its color (see [LabelColors]), or [color]
+/// when given (one being picked).
+class LabelChip extends StatelessWidget {
+  const LabelChip(this.tag, {super.key, this.onDeleted, this.color});
   final String tag;
   final VoidCallback? onDeleted;
-
-  static const _palette = [
-    Color(0xFF5B8DEF),
-    Color(0xFFE5795B),
-    Color(0xFF4FB286),
-    Color(0xFFB57EDC),
-    Color(0xFFE3B341),
-    Color(0xFF4FB3C9),
-    Color(0xFFE06C9F),
-    Color(0xFF8E9AAF),
-  ];
-
-  static Color colorFor(String tag) =>
-      _palette[tag.codeUnits.fold(0, (h, c) => (h * 31 + c) & 0x7fffffff) %
-          _palette.length];
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    final color = colorFor(tag);
+    final color = this.color ?? LabelColors.of(context, tag);
     return Container(
       padding: EdgeInsets.fromLTRB(7, 3, onDeleted == null ? 7 : 3, 3),
       decoration: BoxDecoration(
-        color: Color.lerp(context.colors.card, color, 0.22),
+        color: labelFill(color),
         borderRadius: formRadius,
       ),
       child: Row(
@@ -840,8 +854,8 @@ class TagChip extends StatelessWidget {
                 fontSize: 11.5,
                 height: _chipLineHeight,
                 leadingDistribution: TextLeadingDistribution.even,
-                fontWeight: FontWeight.w500,
-                color: context.colors.chipText(color),
+                fontWeight: FontWeight.w400,
+                color: labelText(color),
               ),
             ),
           ),
@@ -854,7 +868,7 @@ class TagChip extends StatelessWidget {
                 child: Icon(
                   Symbols.close,
                   size: 13,
-                  color: context.colors.chipText(color),
+                  color: labelText(color),
                 ),
               ),
             ),

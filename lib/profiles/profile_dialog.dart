@@ -297,7 +297,7 @@ class _Label extends StatelessWidget {
     text,
     style: TextStyle(
       fontSize: 12,
-      fontWeight: FontWeight.w600,
+      fontWeight: FontWeight.w400,
       color: context.colors.text,
     ),
   );

@@ -10,7 +10,7 @@ feature, existing and new:
 
 - buttons, toggles (e.g. the Board/List switcher), the floating + button
 - inputs, dropdowns and their menus, chips, tags and labels
-- task cards, drag placeholders, empty-state boxes
+- empty-state boxes
 - tiles and swatches (images, colors), sidebar rows, menu buttons
 
 Rules:
@@ -24,12 +24,16 @@ Rules:
   highlight is a 4px rounded square, never a circle (set app-wide via
   `iconButtonTheme`).
 - Exceptions: things that are truly circular by design (the done checkbox,
-  color dots) stay circles.
+  avatars) stay circles. A project's color mark is a 4px rounded square
+  (`ProjectIcon` in `lib/projects/project_logo.dart`), with its logo on
+  it when it has one.
 - One exception: a whole board column being dragged (its drag feedback
   and the drop highlight) uses a slightly rounder **6px**
   (`containerRadius` / `containerShape`), because 4px looks too sharp at
   that size. Columns have no background panel: cards sit straight on the
-  background. Task cards, dialogs and everything else stay at 4px.
+  background. Dialogs and everything else stay at 4px.
+- Task cards (and the empty slot a dragged card leaves) are square: no
+  radius.
 - The list view's table is square (no radius): the header box, each
   group's box and the row hover highlight. The chips inside rows (due
   date, tags, projects) keep 4px.
@@ -38,8 +42,8 @@ Rules:
 
 Surfaces, borders and hover shades are never hard-coded. They come from
 `context.colors` (`AppColors` in `lib/app_theme.dart`), which is worked out
-from the background color picked in Settings (the default gray when the
-background is an image): darker sections mix in black, borders and hover
+from the background color picked in Settings. A background image is only
+drawn over that color; it never changes the colors: darker sections mix in black, borders and hover
 fills mix in white. Use `context.colors.surface`, `.column`, `.card`,
 `.cardBorder`, `.formBorder`, `.fieldBorder`, `.hover`, `.divider`, etc.
 Highlights (buttons, the selected project) use the accent from Settings:
@@ -48,7 +52,9 @@ Highlights (buttons, the selected project) use the accent from Settings:
 Text colors follow it too, since the background can be light (even white):
 never hard-code `Colors.white` or a gray for text, icons or outlines. Use
 `context.colors.text`, `.mutedText` and `.placeholder`. On an accent fill
-use `colorScheme.onPrimary`, and on any other fill (a swatch) use
+use `colorScheme.onPrimary`, which is the near-black `accentText`
+(#141414) whatever the accent, white only on an extremely dark one
+(`onAccentColor`), and on any other fill (a swatch) use
 `contrastOn(fill)`.
 
 Labels and icons are `.text` (white): section headings, the Settings
@@ -60,8 +66,8 @@ empty-state hints.
 
 Use Material Symbols (`Symbols.*` from `material_symbols_icons`), never
 `Icons.*`: the theme sets a lighter stroke weight (300) that only the
-Symbols font supports. The one exception is `Icons.circle`, the solid
-colored project dots (Symbols' circle is an outline).
+Symbols font supports. The one exception is `Icons.circle`, solid dots
+such as the unread marker (Symbols' circle is an outline).
 
 ## Profiles
 

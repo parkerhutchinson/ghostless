@@ -29,18 +29,22 @@ class SettingsRepository {
   /// Background images the user picked are copied here.
   final Directory backgroundsDir;
 
-  Background get background =>
-      Background.fromJson(_settings['background'] as Map<String, Object?>?);
+  /// The image over the background color; null for none. Until one is
+  /// picked (or "No image"), it's the image that ships with the app.
+  Background? get background => switch (_settings) {
+    final s when !s.containsKey('background') => const DefaultBackground(),
+    final s => Background.fromJson(s['background'] as Map<String, Object?>?),
+  };
 
-  /// The background, now and whenever it changes.
-  Stream<Background> watchBackground() =>
+  /// The background image, now and whenever it changes.
+  Stream<Background?> watchBackground() =>
       _changes.map((_) => background).distinct();
 
-  /// Switches the background. A previously picked image that's no longer
-  /// used is deleted.
-  void setBackground(Background value) {
+  /// Switches the background image (null for none), leaving the colors
+  /// alone. A previously picked image that's no longer used is deleted.
+  void setBackground(Background? value) {
     final previous = background;
-    _write({..._settings, 'background': value.toJson()});
+    _writeBackground({'background': value?.toJson()});
     // Unless another profile still has it as their background.
     if (previous is ImageBackground &&
         previous != value &&
@@ -49,13 +53,29 @@ class SettingsRepository {
     }
   }
 
-  /// Shows [value] without cleaning anything up: for live previews (the
-  /// color picker), which may still be cancelled back to an image.
-  void previewBackground(Background value) =>
-      _write({..._settings, 'background': value.toJson()});
+  /// The background color: what the app's surfaces, borders and text are
+  /// worked out from (see AppColors), with or without an image over it.
+  Color get backgroundColor => backgroundColorFromJson(_settings);
 
-  /// Deletes picked images that aren't the background any more (left
-  /// behind by previews; see [previewBackground]).
+  /// The background color, now and whenever it changes.
+  Stream<Color> watchBackgroundColor() =>
+      _changes.map((_) => backgroundColor).distinct();
+
+  /// Switches the background color, leaving the image alone. Also used
+  /// for live previews in the color picker.
+  void setBackgroundColor(Color value) =>
+      _writeBackground({'backgroundColor': value.toARGB32()});
+
+  /// Writes [changes], keeping the color and image as they are otherwise
+  /// (older settings stored the color under `background`).
+  void _writeBackground(Map<String, Object?> changes) => _write({
+    ..._settings,
+    'backgroundColor': backgroundColor.toARGB32(),
+    'background': background?.toJson(),
+    ...changes,
+  });
+
+  /// Deletes picked images that aren't the background any more.
   void deleteUnusedBackgroundImages() {
     if (!backgroundsDir.existsSync()) return;
     final keep = _imagesInUse();

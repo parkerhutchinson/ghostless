@@ -13,27 +13,23 @@ const formShape = RoundedRectangleBorder(borderRadius: formRadius);
 const containerRadius = BorderRadius.all(Radius.circular(6));
 const containerShape = RoundedRectangleBorder(borderRadius: containerRadius);
 
-/// The default accent (a dark blue): filled buttons, the selected
+/// The default accent (the labels' blue): filled buttons, the selected
 /// Board/List toggle, the + button, the selected project, selected chips
-/// and highlighted text. Changeable in Settings (see [accentColors]); in
-/// widgets, read it from the theme: `Theme.of(context).colorScheme.primary`.
-const defaultAccent = Color(0xFF21245C);
+/// and highlighted text. Changeable in Settings, which offers the label
+/// colors (see `labelPalette`); in widgets, read it from the theme:
+/// `Theme.of(context).colorScheme.primary`. Text on it uses [contrastOn].
+const defaultAccent = Color(0xFF5B8DEF);
 
-/// The accent colors offered in Settings, the default first. All dark
-/// enough for white text on top.
-const accentColors = [
-  defaultAccent,
-  Color(0xFF1565C0), // blue
-  Color(0xFF00695C), // teal
-  Color(0xFF2E7D32), // green
-  Color(0xFF4527A0), // indigo
-  Color(0xFF6A1B9A), // purple
-  Color(0xFFAD1457), // magenta
-  Color(0xFFC62828), // red
-  Color(0xFFD84315), // orange
-  Color(0xFF5D4037), // brown
-  Color(0xFF455A64), // slate
-];
+/// Text and icons on the accent (`colorScheme.onPrimary`): this
+/// near-black, whatever accent is picked, unless it's extremely dark
+/// (see [onAccentColor]).
+const accentText = Color(0xFF141414);
+
+/// Text and icons on [accent]: [accentText], or white only when the
+/// accent is so dark the near-black would barely show (luminance under
+/// 0.08; every preset is far above that).
+Color onAccentColor(Color accent) =>
+    accent.computeLuminance() < 0.08 ? Colors.white : accentText;
 
 /// Whether [color] is light enough to need dark text on it.
 bool isLightColor(Color color) =>
@@ -45,8 +41,8 @@ Color contrastOn(Color fill) =>
     isLightColor(fill) ? const Color(0xFF1C1C1C) : Colors.white;
 
 /// Every surface, border, hover shade and text color in the app, worked
-/// out from one base color: the background color picked in Settings (the
-/// default gray for an image background). Read it with `context.colors`.
+/// out from one base color: the background color picked in Settings (a
+/// background image doesn't change it). Read it with `context.colors`.
 ///
 /// Darker sections (column panels, dividers) mix in black. Borders and
 /// hover fills mix in the text color: white on a dark base, black on a
@@ -112,12 +108,6 @@ class AppColors extends ThemeExtension<AppColors> {
 
   /// Empty fields' hint text.
   final Color placeholder;
-
-  /// Text on a tag chip tinted with the tag's [color]: a lighter shade of
-  /// it on a dark base, a darker one on a light base.
-  Color chipText(Color color) => isLight
-      ? Color.lerp(color, Colors.black, 0.4)!
-      : Color.lerp(color, Colors.white, 0.45)!;
 
   /// The sidebar, cards, the task form, dialogs and menus.
   final Color surface;
@@ -214,7 +204,8 @@ ThemeData buildAppTheme({
   Color base = surfaceColor,
 }) {
   final colors = AppColors.from(base);
-  final onAccent = contrastOn(accent);
+  // Near-black on the accent, white only on an extremely dark one.
+  final onAccent = onAccentColor(accent);
   final brightness = colors.isLight ? Brightness.light : Brightness.dark;
   final theme = ThemeData(
     brightness: brightness,
@@ -242,7 +233,30 @@ ThemeData buildAppTheme({
   );
   const shape = WidgetStatePropertyAll<OutlinedBorder>(formShape);
   const style = ButtonStyle(shape: shape);
+  // One light weight (400) for all text, as on the labels: Material's
+  // defaults make titles, buttons and menu items medium or bold. Only
+  // headings set a heavier weight themselves.
+  TextStyle? light(TextStyle? s) => s?.copyWith(fontWeight: FontWeight.w400);
+  final t = theme.textTheme;
+  final textTheme = t.copyWith(
+    displayLarge: light(t.displayLarge),
+    displayMedium: light(t.displayMedium),
+    displaySmall: light(t.displaySmall),
+    headlineLarge: light(t.headlineLarge),
+    headlineMedium: light(t.headlineMedium),
+    headlineSmall: light(t.headlineSmall),
+    titleLarge: light(t.titleLarge),
+    titleMedium: light(t.titleMedium),
+    titleSmall: light(t.titleSmall),
+    bodyLarge: light(t.bodyLarge),
+    bodyMedium: light(t.bodyMedium),
+    bodySmall: light(t.bodySmall),
+    labelLarge: light(t.labelLarge),
+    labelMedium: light(t.labelMedium),
+    labelSmall: light(t.labelSmall),
+  );
   return theme.copyWith(
+    textTheme: textTheme,
     // Text buttons have no fill, so the dark accent would be unreadable as
     // their text; they use the text color.
     textButtonTheme: TextButtonThemeData(

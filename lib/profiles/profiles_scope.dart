@@ -118,10 +118,19 @@ class AssigneeButton extends StatelessWidget {
       ),
       icon: current == null
           // An empty profile picture: assigned to nobody.
-          ? Icon(
-              Symbols.account_circle,
-              size: size,
-              color: context.colors.placeholder,
+          // The glyph's circle fills only 20/24 of its box: scaled up so
+          // the circle itself is [size], like the done checkbox.
+          ? SizedBox.square(
+              dimension: size,
+              child: OverflowBox(
+                maxWidth: size * 1.2,
+                maxHeight: size * 1.2,
+                child: Icon(
+                  Symbols.account_circle,
+                  size: size * 1.2,
+                  color: context.colors.placeholder,
+                ),
+              ),
             )
           : ProfileAvatar(
               profile: current,

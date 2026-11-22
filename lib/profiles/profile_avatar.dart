@@ -4,7 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../app_theme.dart';
-import '../projects/project.dart' show projectColors;
+import '../projects/project.dart' show projectColors, projectHueCount;
 import 'profile.dart';
 
 /// A profile's round picture: their photo, else their initials on a color
@@ -26,7 +26,7 @@ class ProfileAvatar extends StatelessWidget {
 
   /// A steady color per profile, from the project palette.
   Color get _color =>
-      projectColors[profile.id.hashCode.abs() % projectColors.length];
+      projectColors[profile.id.hashCode.abs() % projectHueCount];
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +37,7 @@ class ProfileAvatar extends StatelessWidget {
             initials,
             style: TextStyle(
               fontSize: size * 0.4,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w400,
               color: Colors.white,
               height: 1,
             ),
@@ -49,6 +49,12 @@ class ProfileAvatar extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: initials.isEmpty ? context.colors.hover : _color,
+      ),
+      // The outline is drawn over the photo, not around it: a border in
+      // the decoration insets the child, leaving a ring the photo doesn't
+      // fill.
+      foregroundDecoration: BoxDecoration(
+        shape: BoxShape.circle,
         border: Border.all(color: context.colors.formBorder),
       ),
       alignment: Alignment.center,

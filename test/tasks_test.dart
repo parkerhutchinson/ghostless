@@ -1,3 +1,5 @@
+import 'package:flutter/services.dart';
+
 import 'support/finders.dart';
 
 import 'dart:io';
@@ -6,6 +8,8 @@ import 'package:codename/projects/project.dart';
 import 'package:codename/tasks/task.dart';
 import 'package:codename/projects/project_repository.dart';
 import 'package:codename/tasks/task_repository.dart';
+import 'package:codename/tasks/task_card.dart';
+import 'package:codename/tasks/task_editor.dart';
 import 'package:codename/tasks/tasks_page.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -356,7 +360,7 @@ void main() {
         'Fresh',
       );
       await tester.enterText(
-        find.widgetWithText(TextField, 'Add tag, press Enter'),
+        find.widgetWithText(TextField, 'Add label, press Enter'),
         'ui,',
       );
       await tester.pump();
@@ -367,6 +371,189 @@ void main() {
       expect(created.title, 'Fresh');
       expect(created.tags, ['ui']);
       expect(text('Fresh'), findsOneWidget);
+    });
+
+    testWidgets('Enter adds a typed label; saving keeps it on the project', (
+      tester,
+    ) async {
+      store.put('projects', pid, project.toJson());
+      await pumpPage(tester);
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Task title'),
+        'Labelled',
+      );
+      final field = find.widgetWithText(TextField, 'Add label, press Enter');
+      await tester.tap(field);
+      await tester.enterText(field, 'Design');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(text('Design'), findsOneWidget, reason: 'chip added');
+
+      await tester.tap(text('Create task'));
+      await tester.pumpAndSettle();
+      expect(repo.current().single.tags, ['Design']);
+      expect(ProjectRepository(store).get(pid)?.labels, ['Design']);
+    });
+
+    testWidgets('Edit labels renames a label on the project, its tasks and '
+        'the open form', (tester) async {
+      store.put('projects', pid, project.toJson());
+      final other = repo.create(originId: pid, title: 'Other', tags: ['Bug']);
+      final t = repo.create(originId: pid, title: 'T', tags: ['Bug']);
+      await pumpPage(tester);
+      await tester.tap(text('T'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Edit labels'));
+      await tester.pumpAndSettle();
+      // The name field is the swatch's height.
+      final field = find.widgetWithText(TextField, 'Bug');
+      final swatch = find.descendant(
+        of: find.byTooltip('Color'),
+        matching: find.byType(Container),
+      );
+      expect(
+        tester.getSize(field.first).height,
+        tester.getSize(swatch.first).height,
+      );
+
+      // Closing drops the edit.
+      await tester.enterText(find.widgetWithText(TextField, 'Bug'), 'Oops');
+      await tester.pump();
+      await tester.tap(find.byTooltip('Close').last);
+      await tester.pumpAndSettle();
+      expect(repo.get(t.id)!.tags, ['Bug']);
+      expect(text('Labels in Work'), findsNothing);
+      expect(find.byTooltip('Close'), findsOneWidget, reason: 'form open');
+
+      // Saving applies it.
+      await tester.tap(find.byTooltip('Edit labels'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextField, 'Bug'), 'Defect');
+      await tester.pump();
+      expect(repo.get(t.id)!.tags, ['Bug'], reason: 'not until Save');
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+
+      expect(repo.get(other.id)!.tags, ['Defect']);
+      expect(repo.get(t.id)!.tags, ['Defect']);
+      expect(
+        find.descendant(
+          of: find.byType(TaskEditor),
+          matching: find.widgetWithText(LabelChip, 'Defect'),
+        ),
+        findsOneWidget,
+      );
+      final save = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Save changes'),
+      );
+      expect(save.onPressed, isNull, reason: 'nothing left unsaved');
+
+      // Escape closes just the labels, over the form.
+      await tester.tap(find.byTooltip('Edit labels'));
+      await tester.pumpAndSettle();
+      expect(text('Labels in Work'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(text('Labels in Work'), findsNothing);
+      expect(find.widgetWithText(FilledButton, 'Save changes'), findsOneWidget);
+
+      // A color from the grid.
+      await tester.tap(find.byTooltip('Edit labels'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Color'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('Color 3'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(ProjectRepository(store).get(pid)!.labelColors['defect'], 2);
+
+      // Deleting asks first (tasks use it), then takes it off them.
+      await tester.tap(find.byTooltip('Edit labels'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Delete label'));
+      await tester.pump();
+      expect(repo.get(t.id)!.tags, ['Defect'], reason: 'not until Save');
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(text('It will be removed from 2 tasks.'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Delete and save'));
+      await tester.pumpAndSettle();
+      expect(repo.get(t.id)!.tags, isEmpty);
+      expect(repo.get(other.id)!.tags, isEmpty);
+      expect(
+        find.descendant(
+          of: find.byType(TaskEditor),
+          matching: find.byType(LabelChip),
+        ),
+        findsNothing,
+        reason: 'gone from form',
+      );
+
+      // Nor offered again in the label field.
+      await tester.tap(
+        find.widgetWithText(TextField, 'Add label, press Enter'),
+      );
+      await tester.pumpAndSettle();
+      expect(text('Defect'), findsNothing);
+    });
+
+    testWidgets('the label list shows labels not on the task, on focus and '
+        'after adding one', (tester) async {
+      // Labels used on the project's other tasks.
+      repo.create(originId: pid, title: 'Other', tags: ['Beta', 'Gamma']);
+      final t = repo.create(originId: pid, title: 'T', tags: ['Alpha']);
+      await pumpPage(tester);
+      await tester.tap(text('T'));
+      await tester.pumpAndSettle();
+
+      final field = find.widgetWithText(TextField, 'Add label, press Enter');
+      // The Other card on the board shows Beta and Gamma too.
+      await tester.tap(field);
+      await tester.pumpAndSettle();
+      expect(text('Beta'), findsNWidgets(2));
+      expect(text('Gamma'), findsNWidgets(2));
+
+      await tester.tap(text('Beta').last);
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(TaskEditor),
+          matching: find.widgetWithText(LabelChip, 'Beta'),
+        ),
+        findsOneWidget,
+        reason: 'now a chip on the task',
+      );
+      expect(text('Gamma'), findsNWidgets(2), reason: 'list still open');
+
+      await tester.enterText(field, 'Delta');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(TaskEditor),
+          matching: find.widgetWithText(LabelChip, 'Delta'),
+        ),
+        findsOneWidget,
+      );
+
+      // A new label: pick a color under Create, then Enter.
+      await tester.enterText(field, 'Epsilon');
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('Label color 4'));
+      await tester.pumpAndSettle();
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      store.put('projects', pid, project.toJson());
+      await tester.tap(text('Save changes'));
+      await tester.pumpAndSettle();
+      expect(ProjectRepository(store).get(pid)!.labelColors['epsilon'], 3);
+      expect(text('Gamma'), findsNWidgets(2), reason: 'still open after Enter');
+      expect(repo.get(t.id)!.tags, ['Alpha', 'Beta', 'Delta', 'Epsilon']);
     });
   });
 }

@@ -25,12 +25,34 @@ class ActivityRepository {
   /// The profile making changes on this Mac.
   final String? Function() actorId;
 
-  /// [recipientId]'s activity, newest first. Updates live.
+  /// [recipientId]'s activity, newest first, without what they've
+  /// dismissed. Updates live.
   Stream<List<Activity>> watch(String recipientId) =>
       _store.watch(collection).map((all) => _for(all, recipientId));
 
   List<Activity> current(String recipientId) =>
       _for(_store.all(collection), recipientId);
+
+  /// Hides one item from its recipient (the ✕ on a row). Returns it as it
+  /// was, for [restore] (Undo); null if there was nothing to hide.
+  Activity? dismiss(String id, {DateTime? now}) {
+    final record = _store.get(collection, id);
+    final a = record == null ? null : Activity.fromJson(id, record);
+    if (a == null || a.isDismissed) return null;
+    final at = now ?? DateTime.now().toUtc();
+    // Dismissing also counts as seeing it.
+    _save(a.copyWith(dismissedAt: at, readAt: a.readAt ?? at));
+    return a;
+  }
+
+  /// Hides all of [recipientId]'s activity ("Clear all"). Returns what was
+  /// hidden, as it was, for [restore].
+  List<Activity> dismissAll(String recipientId, {DateTime? now}) => [
+    for (final a in current(recipientId)) ?dismiss(a.id, now: now),
+  ];
+
+  /// Puts back what [dismiss] or [dismissAll] hid (Undo).
+  void restore(Iterable<Activity> items) => items.forEach(_save);
 
   /// Records what a task change means for its assignees: a new assignee
   /// hears they were assigned, a previous one that they were unassigned,
@@ -108,11 +130,16 @@ class ActivityRepository {
     String? actor,
     DateTime now,
   ) {
-    final last = current(recipientId)
-        .where((a) => a.taskId == taskId)
-        .firstOrNull;
+    // Dismissed ones count: an update right after dismissing a row starts
+    // a new one rather than vanishing into the hidden one.
+    final last = _for(
+      _store.all(collection),
+      recipientId,
+      dismissed: true,
+    ).where((a) => a.taskId == taskId).firstOrNull;
     return last != null &&
             last.isUnread &&
+            !last.isDismissed &&
             !last.kind.isReminder &&
             last.actorId == actor &&
             now.difference(last.createdAt) < mergeWindow
@@ -213,11 +240,12 @@ class ActivityRepository {
 
   static List<Activity> _for(
     Map<String, Map<String, Object?>> records,
-    String recipientId,
-  ) => [
+    String recipientId, {
+    bool dismissed = false,
+  }) => [
     for (final MapEntry(:key, :value) in records.entries)
       if (Activity.fromJson(key, value) case final a?
-          when a.recipientId == recipientId)
+          when a.recipientId == recipientId && (dismissed || !a.isDismissed))
         a,
   ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 }

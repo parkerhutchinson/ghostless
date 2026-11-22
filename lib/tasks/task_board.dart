@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../app_theme.dart';
+import '../widgets/frosted_bar.dart';
 import 'task.dart';
 import 'task_repository.dart';
 import 'tasks_page.dart' show TaskCardBuilder;
@@ -174,11 +175,12 @@ class AddColumnButton extends StatelessWidget {
         padding: const EdgeInsets.only(top: 8),
         child: SizedBox(
           width: width,
-          child: OutlinedButton.icon(
+          // The accent, like the + button for a new task.
+          child: FilledButton.icon(
             onPressed: onPressed,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: context.colors.mutedText,
-              side: BorderSide(color: context.colors.cardBorder),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
             icon: const Icon(Symbols.add, size: 18),
@@ -261,22 +263,27 @@ class _BoardColumn extends StatelessWidget {
             ),
             childWhenDragging: Opacity(
               opacity: 0.4,
-              child: ColumnHeader(
-                column: column,
-                count: tasks.length,
-                onCreate: onCreate,
-                onRename: onRename,
+              child: FrostedHeader(
+                child: ColumnHeader(
+                  column: column,
+                  count: tasks.length,
+                  onCreate: onCreate,
+                  onRename: onRename,
+                ),
               ),
             ),
+            // On glass, like the page's header, so it reads over an image.
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
-              child: ColumnHeader(
-                column: column,
-                count: tasks.length,
-                onCreate: onCreate,
-                onRename: onRename,
-                onDelete: onDelete,
-                startEditing: startEditing,
+              child: FrostedHeader(
+                child: ColumnHeader(
+                  column: column,
+                  count: tasks.length,
+                  onCreate: onCreate,
+                  onRename: onRename,
+                  onDelete: onDelete,
+                  startEditing: startEditing,
+                ),
               ),
             ),
           ),
@@ -344,7 +351,6 @@ class _BoardColumn extends StatelessWidget {
                       child: DecoratedBox(
                         decoration: BoxDecoration(
                           color: context.colors.emptySlot,
-                          borderRadius: formRadius,
                           border: Border.all(color: context.colors.cardBorder),
                         ),
                       ),
@@ -505,10 +511,7 @@ class _ColumnHeaderState extends State<ColumnHeader> {
                   ),
                   child: Text(
                     '${widget.count}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: context.colors.mutedText,
-                    ),
+                    style: TextStyle(fontSize: 12, color: context.colors.text),
                   ),
                 ),
               ],
@@ -662,7 +665,9 @@ class _EmptyHint extends StatelessWidget {
     height: 80,
     alignment: Alignment.center,
     decoration: BoxDecoration(
-      // Just an outline: no card shade, since there's no card.
+      // The background color (no card shade, since there's no card), so
+      // it reads over a background image.
+      color: context.colors.surface,
       borderRadius: formRadius,
       border: Border.all(color: context.colors.cardBorder),
     ),

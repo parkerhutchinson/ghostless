@@ -7,12 +7,12 @@ import 'activity/activity_repository.dart';
 import 'app_theme.dart';
 import 'data/app_data.dart';
 import 'layout.dart';
-import 'sync_status_indicator.dart';
 import 'profiles/profile_repository.dart';
 import 'profiles/profiles_scope.dart';
 import 'projects/project_repository.dart';
 import 'projects/workspace.dart';
 import 'settings/background.dart';
+import 'tasks/label_colors.dart';
 import 'settings/settings_repository.dart';
 import 'tasks/task_repository.dart';
 import 'traffic_lights.dart';
@@ -52,13 +52,10 @@ Future<void> main() async {
   window.center();
   window.show();
 
-  // The native window shows through briefly while resizing; match a chosen
-  // color.
-  settings.watchBackground().listen((b) {
-    window.backgroundColor = switch (b) {
-      ColorBackground(:final color) => color,
-      _ => appBackground,
-    }.toNative();
+  // The native window shows through briefly while resizing; match the
+  // background color.
+  settings.watchBackgroundColor().listen((c) {
+    window.backgroundColor = c.toNative();
   });
 
   // What others do to your tasks; recorded as tasks are saved here.
@@ -125,11 +122,10 @@ class MainApp extends StatelessWidget {
     return StreamBuilder<Color>(
       stream: settings.watchAccent(),
       initialData: settings.accent,
-      builder: (context, accent) => StreamBuilder<Background>(
-        stream: settings.watchBackground(),
-        initialData: settings.background,
-        builder: (context, background) =>
-            _app(accent.requireData, background.requireData.baseColor),
+      builder: (context, accent) => StreamBuilder<Color>(
+        stream: settings.watchBackgroundColor(),
+        initialData: settings.backgroundColor,
+        builder: (context, base) => _app(accent.requireData, base.requireData),
       ),
     );
   }
@@ -139,33 +135,42 @@ class MainApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(accent: accent, base: base),
       // The background (picked in Settings) sits behind the whole window,
-      // title bar area included.
-      builder: (context, child) => StreamBuilder<Background>(
+      // title bar area included. The image (if any) is drawn over the
+      // background color, which also shows while it loads; the app's colors
+      // follow the color, never the image.
+      builder: (context, child) => StreamBuilder<Background?>(
         stream: settings.watchBackground(),
         initialData: settings.background,
-        builder: (context, snap) => DecoratedBox(
-          decoration: switch (snap.requireData) {
-            ColorBackground(:final color) => BoxDecoration(color: color),
-            ImageBackground(:final fileName) => BoxDecoration(
-              color: appBackground, // fallback while the image loads
-              image: DecorationImage(
-                image: FileImage(settings.backgroundFile(fileName)),
-                fit: BoxFit.cover,
-                // Missing file (deleted outside the app): show the color.
-                onError: (_, _) {},
+        builder: (context, snap) {
+          final ImageProvider? image = switch (snap.data) {
+            null => null,
+            ImageBackground(:final fileName) => FileImage(
+              settings.backgroundFile(fileName),
+            ),
+            DefaultBackground() => const AssetImage(DefaultBackground.asset),
+          };
+          return DecoratedBox(
+            decoration: BoxDecoration(
+              color: base,
+              image: image == null
+                  ? null
+                  : DecorationImage(
+                      image: image,
+                      fit: BoxFit.cover,
+                      // Missing file (deleted outside the app): the color.
+                      onError: (_, _) {},
+                    ),
+            ),
+            // Above the navigator, so dialogs (the task form) see it too.
+            child: BackgroundImageScope(
+              image: image,
+              child: ProfilesScope.watching(
+                profiles,
+                child: LabelColors.watching(projects, child: child!),
               ),
             ),
-            MountainsBackground() => const BoxDecoration(
-              color: appBackground,
-              image: DecorationImage(
-                image: AssetImage(MountainsBackground.asset),
-                fit: BoxFit.cover,
-              ),
-            ),
-          },
-          // Above the navigator, so dialogs (the task form) see it too.
-          child: ProfilesScope.watching(profiles, child: child!),
-        ),
+          );
+        },
       ),
       home: Scaffold(
         backgroundColor: Colors.transparent,
@@ -199,14 +204,6 @@ class MainApp extends StatelessWidget {
                     top: 0,
                     bottom: 0,
                     child: Center(child: TrafficLights()),
-                  ),
-                  // Close to the right edge (the icon has 4px padding of
-                  // its own for a bigger hover target).
-                  Positioned(
-                    right: 6,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(child: SyncStatusIndicator(sync: data.sync)),
                   ),
                 ],
               ),

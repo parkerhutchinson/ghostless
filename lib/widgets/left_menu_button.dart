@@ -19,7 +19,12 @@ class LeftMenuButton<T> extends StatelessWidget {
     this.constraints,
     this.onOpened,
     this.onCanceled,
+    this.buttonSize,
   });
+
+  /// Makes the button a square this size (the icon centered); otherwise
+  /// the theme's size.
+  final double? buttonSize;
 
   final Widget icon;
   final PopupMenuItemBuilder<T> itemBuilder;
@@ -72,8 +77,15 @@ class LeftMenuButton<T> extends StatelessWidget {
     builder: (context) => IconButton(
       tooltip: tooltip,
       iconSize: iconSize,
-      padding: padding,
-      style: style,
+      padding: buttonSize == null ? padding : EdgeInsets.zero,
+      constraints: buttonSize == null
+          ? null
+          : BoxConstraints.tightFor(width: buttonSize, height: buttonSize),
+      style: buttonSize == null
+          ? style
+          : (style ?? const ButtonStyle()).copyWith(
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
       icon: icon,
       onPressed: () => _open(context),
     ),

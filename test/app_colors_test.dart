@@ -1,6 +1,5 @@
 import 'package:codename/app_theme.dart';
 import 'package:codename/layout.dart';
-import 'package:codename/settings/background.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -45,13 +44,6 @@ void main() {
     }
   });
 
-  test('a color background is the base; an image falls back to gray', () {
-    const teal = Color(0xFF00695C);
-    expect(const ColorBackground(teal).baseColor, teal);
-    expect(const MountainsBackground().baseColor, surfaceColor);
-    expect(const ImageBackground('x.png').baseColor, surfaceColor);
-  });
-
   test('the theme carries the palette and uses the base for surfaces', () {
     const teal = Color(0xFF00695C);
     final theme = buildAppTheme(base: teal);
@@ -77,12 +69,15 @@ void main() {
     expect(buildAppTheme().brightness, Brightness.dark);
   });
 
-  test('text on an accent contrasts with it', () {
-    expect(contrastOn(defaultAccent), Colors.white);
-    expect(isLightColor(contrastOn(const Color(0xFFFFEB3B))), isFalse);
+  test('text on the accent is near-black, white only on a very dark one', () {
+    expect(buildAppTheme().colorScheme.onPrimary, accentText);
     expect(
       buildAppTheme(accent: const Color(0xFFFFEB3B)).colorScheme.onPrimary,
-      contrastOn(const Color(0xFFFFEB3B)),
+      accentText,
+    );
+    expect(
+      buildAppTheme(accent: const Color(0xFF101030)).colorScheme.onPrimary,
+      Colors.white,
     );
   });
 }

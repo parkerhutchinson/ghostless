@@ -268,6 +268,55 @@ void main() {
     });
   });
 
+  group('dismissing', () {
+    test('hides an item, marks it read, and Undo brings it back', () {
+      final t = make(assignee: 'you');
+      final a = activity.current('you').single;
+      final before = activity.dismiss(a.id)!;
+      expect(activity.current('you'), isEmpty);
+      expect(before.isUnread, isTrue, reason: 'as it was');
+      expect(activity.dismiss(a.id), isNull, reason: 'already hidden');
+      activity.restore([before]);
+      expect(activity.current('you').single.taskId, t.id);
+      expect(activity.current('you').single.isUnread, isTrue);
+    });
+
+    test('clear all hides everything; Undo restores it all', () {
+      make(assignee: 'you');
+      make(assignee: 'you');
+      make(assignee: 'them');
+      final cleared = activity.dismissAll('you');
+      expect(cleared, hasLength(2));
+      expect(activity.current('you'), isEmpty);
+      expect(activity.current('them'), hasLength(1), reason: 'only yours');
+      activity.restore(cleared);
+      expect(activity.current('you'), hasLength(2));
+    });
+
+    test('a dismissed reminder isn’t added again', () {
+      final day = DateTime(2026, 11, 21);
+      tasks.create(
+        title: 'Report',
+        originId: 'p',
+        assigneeId: 'me',
+        dueDate: day,
+      );
+      activity.addReminders('me', tasks.current(), now: day);
+      activity.dismiss(activity.current('me').single.id);
+      activity.addReminders('me', tasks.current(), now: day);
+      expect(activity.current('me'), isEmpty);
+    });
+
+    test('a change after dismissing shows as a new item', () {
+      final t = make(assignee: 'you');
+      activity.dismiss(activity.current('you').single.id);
+      tasks.save(t.copyWith(title: 'Renamed'));
+      final shown = activity.current('you').single;
+      expect(shown.kind, ActivityKind.updated);
+      expect(shown.isDismissed, isFalse);
+    });
+  });
+
   test('JSON round-trip, and unreadable records are skipped', () {
     final a = Activity(
       id: 'a',
