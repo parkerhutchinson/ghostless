@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -6,6 +7,7 @@ import 'package:file_selector/file_selector.dart';
 import 'project.dart';
 import 'project_logo.dart';
 import '../app_theme.dart';
+import '../tasks/form_buttons.dart';
 
 /// What the project dialog returns: the name, color and logo (null for
 /// none), or [delete].
@@ -26,8 +28,8 @@ Future<ProjectDialogResult?> showProjectDialog(
   bool canDelete = false,
 }) => showDialog(
   context: context,
-  // No scrim: the dialog sits directly on the app.
-  barrierColor: Colors.transparent,
+  // The same dimmed backdrop as Settings.
+  barrierColor: Colors.black54,
   builder: (_) => _ProjectDialog(
     project: project,
     defaultColorIndex: defaultColorIndex,
@@ -98,6 +100,25 @@ class _ProjectDialogState extends State<_ProjectDialog> {
     super.dispose();
   }
 
+  /// Color [i] as a square to pick; outlined when it's the one picked.
+  Widget _swatch(int i) => Semantics(
+    label: 'Color ${i + 1}',
+    selected: i == _color,
+    child: InkWell(
+      onTap: () => setState(() => _color = i),
+      customBorder: formShape,
+      child: Container(
+        decoration: BoxDecoration(
+          color: projectColors[i],
+          borderRadius: formRadius,
+          border: i == _color
+              ? Border.all(color: context.colors.text, width: 2.5)
+              : null,
+        ),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final isNew = widget.project == null;
@@ -111,48 +132,87 @@ class _ProjectDialogState extends State<_ProjectDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           spacing: 20,
           children: [
-            TextField(
-              controller: _name,
-              autofocus: true,
-              decoration: const InputDecoration(
-                hintText: 'Project name',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (_) => _submit(),
-            ),
-            _logoRow(),
-            // Nine to a row, around the color wheel.
-            SizedBox(
-              width: 9 * 26 + 8 * 6,
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final i in projectColorOrder)
-                    Semantics(
-                      label: 'Color ${i + 1}',
-                      selected: i == _color,
-                      child: InkWell(
-                        onTap: () => setState(() => _color = i),
-                        customBorder: formShape,
-                        child: Container(
-                          width: 26,
-                          height: 26,
-                          decoration: BoxDecoration(
-                            color: projectColors[i],
-                            borderRadius: formRadius,
-                            border: i == _color
-                                ? Border.all(
-                                    color: context.colors.text,
-                                    width: 2.5,
-                                  )
-                                : null,
-                          ),
-                        ),
+            // The project's mark (its color, with its logo), then its
+            // name; under them, why a picked logo was turned down.
+            // The mark and the field, both [_markSize] tall.
+            // Lined up at the top: the mark's box runs past its bottom
+            // (see [_mark]); the gap after it is 14 to the mark itself.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: 14 - _overhang,
+              children: [
+                _mark(),
+                Expanded(
+                  // At least the mark's height; a long name wraps and the
+                  // field grows downward with it.
+                  child: TextField(
+                    controller: _name,
+                    autofocus: true,
+                    minLines: 1,
+                    maxLines: null,
+                    textAlignVertical: TextAlignVertical.center,
+                    // Enter saves (a multi-line field would add a line).
+                    keyboardType: TextInputType.text,
+                    textInputAction: TextInputAction.done,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.deny(RegExp(r'[\r\n]')),
+                    ],
+                    // One line (fixed at 21) plus its padding is exactly
+                    // the mark's height. (A minimum height wouldn't do:
+                    // the border is drawn around the text, not the box.)
+                    style: const TextStyle(fontSize: 14),
+                    strutStyle: const StrutStyle(
+                      fontSize: 14,
+                      height: _lineHeight / 14,
+                      forceStrutHeight: true,
+                    ),
+                    decoration: const InputDecoration(
+                      hintText: 'Project name',
+                      // Not the desktop's compact density, which would
+                      // take 8 off the height.
+                      visualDensity: VisualDensity.standard,
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: (_markSize - _lineHeight) / 2,
                       ),
                     ),
-                ],
+                    onSubmitted: (_) => _submit(),
+                  ),
+                ),
+              ],
+            ),
+            if (_logoError case final error?)
+              Text(
+                error,
+                style: TextStyle(fontSize: 12, color: Colors.red.shade300),
               ),
+            // Nine to a row, around the color wheel, across the full width
+            // (each square, sized to fit).
+            Column(
+              spacing: 6,
+              children: [
+                for (
+                  var start = 0;
+                  start < projectColorOrder.length;
+                  start += 9
+                )
+                  Row(
+                    spacing: 6,
+                    children: [
+                      for (var k = start; k < start + 9; k++)
+                        Expanded(
+                          child: k < projectColorOrder.length
+                              ? AspectRatio(
+                                  aspectRatio: 1,
+                                  child: _swatch(projectColorOrder[k]),
+                                )
+                              : const SizedBox(),
+                        ),
+                    ],
+                  ),
+              ],
             ),
           ],
         ),
@@ -163,18 +223,15 @@ class _ProjectDialogState extends State<_ProjectDialog> {
           spacing: 8,
           children: [
             if (widget.canDelete)
-              TextButton.icon(
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.red.shade300,
-                ),
+              FilledButton(
+                style: deleteButtonStyle(),
                 onPressed: () => Navigator.pop(context, (
                   name: _name.text.trim(),
                   colorIndex: _color,
                   logo: _logo,
                   delete: true,
                 )),
-                icon: const Icon(Symbols.delete, size: 18),
-                label: const Text('Delete project'),
+                child: const Text('Delete project'),
               ),
             const Spacer(),
             TextButton(
@@ -191,53 +248,90 @@ class _ProjectDialogState extends State<_ProjectDialog> {
     );
   }
 
-  /// The logo (or, without one, the color it falls back to), with
-  /// buttons to choose or remove it.
-  Widget _logoRow() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    spacing: 8,
-    children: [
-      Row(
-        spacing: 12,
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: context.colors.card,
-              borderRadius: formRadius,
-              border: Border.all(color: context.colors.cardBorder),
-            ),
-            alignment: Alignment.center,
-            child: ProjectIcon.of(
-              color: projectColors[_color % projectColors.length],
-              logo: _logo,
-              size: 40,
-            ),
-          ),
-          OutlinedButton.icon(
-            onPressed: _pickLogo,
-            icon: const Icon(Symbols.upload, size: 18),
-            label: Text(_logo == null ? 'Add logo…' : 'Replace logo…'),
-          ),
-          if (_logo != null)
-            TextButton(
-              onPressed: () => setState(() => _logo = null),
-              child: const Text('Remove'),
-            ),
-        ],
+  /// The mark's size, and the name field's height beside it.
+  static const _markSize = 36.0;
+
+  /// How far the logo button hangs past the mark's bottom-right corner.
+  static const _overhang = 8.0;
+
+  /// The name field's line height: with its padding, one line is
+  /// [_markSize] tall.
+  static const _lineHeight = 21.0;
+
+  static const _logoHint = 'Square: PNG, JPG, GIF, WebP or SVG';
+
+  /// The project's color square (with its logo on it), and a small button
+  /// on its corner to upload a logo; with one, it offers Replace and
+  /// Remove.
+  ///
+  /// The box takes in the button where it hangs past the mark's corner
+  /// ([_overhang]): clicks only land inside a widget's box, so a button
+  /// hanging outside it would only answer on the part over the mark.
+  Widget _mark() => SizedBox.square(
+    dimension: _markSize + _overhang,
+    child: Stack(
+      children: [
+        ProjectIcon.of(
+          color: projectColors[_color % projectColors.length],
+          logo: _logo,
+          size: _markSize,
+        ),
+        Positioned(
+          right: 0,
+          bottom: 0,
+          child: _logo == null
+              ? _markButton(
+                  tooltip: 'Upload logo\n$_logoHint',
+                  onPressed: _pickLogo,
+                )
+              : MenuAnchor(
+                  menuChildren: [
+                    MenuItemButton(
+                      leadingIcon: const Icon(Symbols.upload, size: 18),
+                      onPressed: _pickLogo,
+                      child: const Text('Replace logo…'),
+                    ),
+                    MenuItemButton(
+                      // No icon; in line with Replace logo's text.
+                      leadingIcon: const SizedBox(width: 18),
+                      onPressed: () => setState(() {
+                        _logo = null;
+                        _logoError = null;
+                      }),
+                      child: const Text('Remove logo'),
+                    ),
+                  ],
+                  builder: (context, menu, _) => _markButton(
+                    tooltip: 'Logo',
+                    onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+                  ),
+                ),
+        ),
+      ],
+    ),
+  );
+
+  /// The upload button on the mark's corner: small, on the dialog's color
+  /// with an outline, so it stands off the mark.
+  Widget _markButton({
+    required String tooltip,
+    required VoidCallback onPressed,
+  }) => Tooltip(
+    message: tooltip,
+    child: Material(
+      color: context.colors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: formRadius,
+        side: BorderSide(color: context.colors.formBorder),
       ),
-      Text(
-        _logoError ??
-            'Square, up to $maxLogoSize × $maxLogoSize: PNG, JPG, GIF, WebP '
-                'or SVG.',
-        style: TextStyle(
-          fontSize: 12,
-          color: _logoError != null
-              ? Colors.red.shade300
-              : context.colors.mutedText,
+      child: InkWell(
+        onTap: onPressed,
+        customBorder: formShape,
+        child: SizedBox.square(
+          dimension: 22,
+          child: Icon(Symbols.upload, size: 14, color: context.colors.text),
         ),
       ),
-    ],
+    ),
   );
 }

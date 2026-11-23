@@ -1,0 +1,791 @@
+import 'dart:async';
+
+import '../data/ids.dart';
+import '../profiles/profile_repository.dart';
+import '../projects/project.dart';
+import '../projects/project_repository.dart';
+import '../tasks/due_date.dart';
+import '../tasks/task.dart';
+import '../tasks/task_repository.dart';
+import 'task_change_feed.dart';
+
+/// Something a tool call got wrong (an unknown task, a bad date): told to
+/// the AI assistant so it can fix the call. Not a crash.
+final class McpToolError implements Exception {
+  const McpToolError(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+/// One tool the MCP server offers: its [name], what it does
+/// ([description], read by the AI assistant), the arguments it takes (a
+/// JSON Schema) and what it does with them ([run], returning JSON).
+final class McpTool {
+  const McpTool({
+    required this.name,
+    required this.title,
+    required this.description,
+    required this.inputSchema,
+    required this.run,
+    this.readOnly = false,
+    this.destructive = false,
+  });
+
+  final String name;
+  final String title;
+  final String description;
+  final Map<String, Object?> inputSchema;
+  final FutureOr<Object?> Function(Map<String, Object?> args) run;
+
+  /// Only looks: changes nothing.
+  final bool readOnly;
+
+  /// Deletes something (MCP clients ask before running these).
+  final bool destructive;
+
+  Map<String, Object?> toJson() => {
+    'name': name,
+    'title': title,
+    'description': description,
+    'inputSchema': inputSchema,
+    'annotations': {
+      'title': title,
+      'readOnlyHint': readOnly,
+      'destructiveHint': destructive,
+      'openWorldHint': false,
+    },
+  };
+}
+
+/// The app's tools for AI assistants: reading and changing projects and
+/// tasks through the same repositories the screens use, as the profile
+/// using the app on this Mac (whose personal project is the only one it
+/// sees; changes show in Activity as theirs).
+final class McpTools {
+  McpTools({
+    required this.tasks,
+    required this.projects,
+    required this.profiles,
+  });
+
+  final TaskRepository tasks;
+  final ProjectRepository projects;
+  final ProfileRepository profiles;
+
+  /// Recent task changes, for wait_for_changes. Starts watching on first
+  /// use.
+  late final TaskChangeFeed changes = TaskChangeFeed(tasks);
+
+  Future<void> dispose() async => _feedStarted ? changes.dispose() : null;
+  bool _feedStarted = false;
+
+  late final List<McpTool> all = [
+    McpTool(
+      name: 'list_projects',
+      title: 'List projects',
+      description:
+          'Lists the projects (boards), in sidebar order: id, name, whether '
+          'it is the personal project, its columns (left to right) and how '
+          'many tasks it has.',
+      inputSchema: _object({}),
+      readOnly: true,
+      run: (_) => [for (final p in _projects) _projectJson(p)],
+    ),
+    McpTool(
+      name: 'create_project',
+      title: 'Create project',
+      description:
+          'Creates a shared project (board) at the bottom of the sidebar, '
+          'with the next color in turn. Its columns are To do, In progress '
+          'and Done unless columns are given. Returns it.',
+      inputSchema: _object(
+        {
+          'name': _string('The project\'s name.'),
+          'columns': _strings('Its columns\' names, left to right.'),
+        },
+        required: ['name'],
+      ),
+      run: (args) {
+        final name = _requiredString(args, 'name').trim();
+        if (name.isEmpty) throw const McpToolError('name is required.');
+        if (_projects.any((p) => p.name.toLowerCase() == name.toLowerCase())) {
+          throw McpToolError('There\'s already a project "$name".');
+        }
+        final columnNames = _stringList(args['columns']);
+        var project = projects.create(name);
+        if (columnNames.isNotEmpty) {
+          project = project.copyWith(
+            columns: [for (final c in columnNames) TaskColumn(newId(), c)],
+          );
+          projects.save(project);
+        }
+        return _projectJson(project);
+      },
+    ),
+    McpTool(
+      name: 'list_people',
+      title: 'List people',
+      description:
+          'Lists the people (profiles) tasks can be assigned to, with which '
+          'one is using the app.',
+      inputSchema: _object({}),
+      readOnly: true,
+      run: (_) {
+        final me = profiles.current?.id;
+        return [
+          for (final p in profiles.all())
+            {'id': p.id, 'name': p.displayName, 'isMe': p.id == me},
+        ];
+      },
+    ),
+    McpTool(
+      name: 'list_tasks',
+      title: 'List tasks',
+      description:
+          'Lists a project\'s tasks in board order (by column, then '
+          'position), as summaries. Use get_task for a task\'s description '
+          'and subtasks.',
+      inputSchema: _object(
+        {
+          'project': _project,
+          'column': _string('Only this column (its id or name).'),
+          'completed': _boolean(
+            'Only completed tasks (true) or only open ones (false); both '
+            'when left out.',
+          ),
+          'assignee': _string(
+            'Only tasks assigned to this person (id or name), or '
+            '"unassigned".',
+          ),
+        },
+        required: ['project'],
+      ),
+      readOnly: true,
+      run: (args) {
+        final project = _projectArg(args);
+        final column = switch (args['column']) {
+          final String c => _column(project, c).id,
+          _ => null,
+        };
+        final completed = args['completed'] as bool?;
+        final assignee = switch (args['assignee']) {
+          final String a when a.toLowerCase() == 'unassigned' => '',
+          final String a => _person(a),
+          _ => null,
+        };
+        return [
+          for (final t in _boardOrder(project))
+            if (column == null ||
+                project.columnFor(t.placementIn(project.id).status) == column)
+              if (completed == null || t.isCompletedIn(project.id) == completed)
+                if (assignee == null || (t.assigneeId ?? '') == assignee)
+                  _taskSummary(t, project),
+        ];
+      },
+    ),
+    McpTool(
+      name: 'search_tasks',
+      title: 'Search tasks',
+      description:
+          'Finds tasks whose title, description, labels or subtasks contain '
+          'the text (ignoring case), across every project or in one.',
+      inputSchema: _object(
+        {'query': _string('The text to look for.'), 'project': _project},
+        required: ['query'],
+      ),
+      readOnly: true,
+      run: (args) {
+        final query = _requiredString(args, 'query').toLowerCase();
+        final only = args['project'] == null ? null : _projectArg(args);
+        final visible = {for (final p in _projects) p.id: p};
+        bool matches(Task t) => [
+          t.title,
+          t.description,
+          ...t.tags,
+          for (final s in t.subtasks) s.title,
+        ].any((text) => text.toLowerCase().contains(query));
+        return [
+          for (final t in tasks.current())
+            if (visible[t.originId] case final origin?)
+              if (only == null || t.isIn(only.id))
+                if (matches(t)) _taskSummary(t, only ?? origin),
+        ];
+      },
+    ),
+    McpTool(
+      name: 'get_task',
+      title: 'Get task',
+      description:
+          'Everything about one task: title, description (Markdown), column '
+          'and completion on each of its projects, assignee, due date, '
+          'labels, subtasks (with ids) and attachment names.',
+      inputSchema: _object({'taskId': _taskId}, required: ['taskId']),
+      readOnly: true,
+      run: (args) => _taskDetail(_task(args)),
+    ),
+    McpTool(
+      name: 'create_task',
+      title: 'Create task',
+      description:
+          'Creates a task at the bottom of a column (the first column by '
+          'default) in a project. Returns it.',
+      inputSchema: _object(
+        {
+          'project': _project,
+          'title': _string('The task\'s title.'),
+          'description': _string('Details, in Markdown.'),
+          'column': _string('The column to put it in (its id or name).'),
+          'assignee': _string('Who it\'s for (a person\'s id or name).'),
+          'dueDate': _string('Due day, YYYY-MM-DD.'),
+          'dueTime': _string(
+            'Due time of day, HH:MM (24-hour); needs dueDate.',
+          ),
+          'labels': _strings('Labels to put on it.'),
+          'subtasks': _strings('Subtask titles, in order.'),
+        },
+        required: ['project', 'title'],
+      ),
+      run: (args) {
+        final project = _projectArg(args);
+        final title = _requiredString(args, 'title').trim();
+        if (title.isEmpty) throw const McpToolError('The title is empty.');
+        final dueDate = _day(args['dueDate']);
+        final labels = _stringList(args['labels']);
+        final created = tasks.create(
+          title: title,
+          description: (args['description'] as String? ?? '').trim(),
+          status: switch (args['column']) {
+            final String c => _column(project, c).id,
+            _ => project.columns.first.id,
+          },
+          tags: labels,
+          originId: project.id,
+          dueDate: dueDate,
+          dueTime: dueDate == null ? null : _time(args['dueTime']),
+          subtasks: [
+            for (final s in _stringList(args['subtasks']))
+              Subtask(id: newId(), title: s),
+          ],
+          // On a personal project, always its owner.
+          assigneeId:
+              project.ownerId ??
+              switch (args['assignee']) {
+                final String a => _person(a),
+                _ => null,
+              },
+        );
+        projects.addLabels(project.id, labels);
+        return _taskDetail(created);
+      },
+    ),
+    McpTool(
+      name: 'update_task',
+      title: 'Update task',
+      description:
+          'Changes a task\'s details; only the fields given change. Pass '
+          'null for assignee or dueDate to clear it. labels replaces all its '
+          'labels.',
+      inputSchema: _object(
+        {
+          'taskId': _taskId,
+          'title': _string('New title.'),
+          'description': _string('New description, in Markdown.'),
+          'assignee': {
+            'type': ['string', 'null'],
+            'description': 'A person\'s id or name; null to unassign.',
+          },
+          'dueDate': {
+            'type': ['string', 'null'],
+            'description': 'YYYY-MM-DD; null to remove the due date.',
+          },
+          'dueTime': {
+            'type': ['string', 'null'],
+            'description': 'HH:MM (24-hour); null for no time.',
+          },
+          'labels': _strings('Its labels (replacing the ones it has).'),
+        },
+        required: ['taskId'],
+      ),
+      run: (args) {
+        var task = _task(args);
+        if (args['title'] case final String title) {
+          if (title.trim().isEmpty) {
+            throw const McpToolError('The title is empty.');
+          }
+          task = task.copyWith(title: title.trim());
+        }
+        if (args['description'] case final String d) {
+          task = task.copyWith(description: d.trim());
+        }
+        if (args.containsKey('assignee') && !_isPersonal(task)) {
+          task = task.copyWith(
+            assigneeId: switch (args['assignee']) {
+              final String a => _person(a),
+              _ => null,
+            },
+          );
+        }
+        if (args.containsKey('dueDate')) {
+          final day = _day(args['dueDate']);
+          task = task.copyWith(
+            dueDate: day,
+            dueTime: day == null ? null : task.dueTime,
+          );
+        }
+        if (args.containsKey('dueTime')) {
+          if (task.dueDate == null && args['dueTime'] != null) {
+            throw const McpToolError('Set a dueDate before a dueTime.');
+          }
+          task = task.copyWith(dueTime: _time(args['dueTime']));
+        }
+        if (args['labels'] != null) {
+          final labels = _stringList(args['labels']);
+          task = task.copyWith(tags: labels);
+          projects.addLabels(task.originId, labels);
+        }
+        tasks.save(task);
+        return _taskDetail(tasks.get(task.id) ?? task);
+      },
+    ),
+    McpTool(
+      name: 'move_task',
+      title: 'Move task',
+      description:
+          'Moves a task to a column on one of its projects\' boards (its '
+          'origin project by default), at the top or bottom.',
+      inputSchema: _object(
+        {
+          'taskId': _taskId,
+          'column': _string('The column (its id or name).'),
+          'project': _string(
+            'Which board, for a task in several projects (id or name).',
+          ),
+          'position': {
+            'type': 'string',
+            'enum': ['top', 'bottom'],
+            'description': 'Where in the column; bottom by default.',
+          },
+        },
+        required: ['taskId', 'column'],
+      ),
+      run: (args) {
+        final task = _task(args);
+        final board = _board(task, args);
+        final column = _column(board, _requiredString(args, 'column'));
+        tasks.move(
+          task.id,
+          column.id,
+          args['position'] == 'top' ? 0 : 1 << 30,
+          projectId: board.id,
+        );
+        return _taskDetail(tasks.get(task.id)!);
+      },
+    ),
+    McpTool(
+      name: 'set_task_completed',
+      title: 'Complete task',
+      description:
+          'Checks a task off (or back on) on one of its projects\' boards (its '
+          'origin project by default). It stays in its column.',
+      inputSchema: _object(
+        {
+          'taskId': _taskId,
+          'completed': _boolean('true to check it off, false to reopen it.'),
+          'project': _string(
+            'Which board, for a task in several projects (id or name).',
+          ),
+        },
+        required: ['taskId', 'completed'],
+      ),
+      run: (args) {
+        final task = _task(args);
+        final board = _board(task, args);
+        final done = args['completed'];
+        if (done is! bool) {
+          throw const McpToolError('completed must be true or false.');
+        }
+        tasks.save(task.withCompleted(board.id, done));
+        return _taskDetail(tasks.get(task.id)!);
+      },
+    ),
+    McpTool(
+      name: 'add_subtasks',
+      title: 'Add subtasks',
+      description: 'Adds subtasks to the end of a task\'s list.',
+      inputSchema: _object(
+        {'taskId': _taskId, 'titles': _strings('Their titles, in order.')},
+        required: ['taskId', 'titles'],
+      ),
+      run: (args) {
+        final task = _task(args);
+        final titles = _stringList(args['titles']);
+        if (titles.isEmpty) throw const McpToolError('No titles given.');
+        tasks.save(
+          task.copyWith(
+            subtasks: [
+              ...task.subtasks,
+              for (final t in titles) Subtask(id: newId(), title: t),
+            ],
+          ),
+        );
+        return _taskDetail(tasks.get(task.id)!);
+      },
+    ),
+    McpTool(
+      name: 'set_subtask_done',
+      title: 'Check off subtask',
+      description: 'Checks a subtask off, or back on.',
+      inputSchema: _object(
+        {
+          'taskId': _taskId,
+          'subtaskId': _string('The subtask\'s id (from get_task).'),
+          'done': _boolean('true to check it off, false to uncheck it.'),
+        },
+        required: ['taskId', 'subtaskId', 'done'],
+      ),
+      run: (args) {
+        final task = _task(args);
+        final id = _requiredString(args, 'subtaskId');
+        if (!task.subtasks.any((s) => s.id == id)) {
+          throw McpToolError('The task has no subtask "$id".');
+        }
+        final done = args['done'] == true;
+        tasks.save(
+          task.copyWith(
+            subtasks: [
+              for (final s in task.subtasks)
+                s.id == id ? s.copyWith(done: done) : s,
+            ],
+          ),
+        );
+        return _taskDetail(tasks.get(task.id)!);
+      },
+    ),
+    McpTool(
+      name: 'wait_for_changes',
+      title: 'Wait for changes',
+      description:
+          'Reports changes to tasks (someone created, completed, reopened, '
+          'moved, edited or deleted one), oldest first, each with a seq '
+          'number. Pass the cursor from the last call as after; if nothing '
+          'has changed since, it waits up to timeoutSeconds for something '
+          'to. Leave after out to just get the current cursor.',
+      inputSchema: _object({
+        'after': {
+          'type': 'integer',
+          'description': 'The cursor from the last call.',
+        },
+        'timeoutSeconds': {
+          'type': 'number',
+          'description':
+              'How long to wait for a change: 0 to 60, 25 by '
+              'default.',
+        },
+      }),
+      readOnly: true,
+      run: (args) async {
+        _feedStarted = true;
+        final feed = changes;
+        final after = switch (args['after']) {
+          null => null,
+          final num n => n.toInt(),
+          _ => throw const McpToolError('after must be a number.'),
+        };
+        if (after == null) return {'cursor': feed.latest, 'changes': []};
+        final seconds = switch (args['timeoutSeconds']) {
+          null => 25,
+          final num n => n.clamp(0, 60),
+          _ => throw const McpToolError('timeoutSeconds must be a number.'),
+        };
+        final events = await feed.wait(
+          after,
+          Duration(milliseconds: (seconds * 1000).round()),
+        );
+        final visible = {for (final p in _projects) p.id: p};
+        return {
+          'cursor': events.isEmpty ? after : events.last.seq,
+          'changes': [
+            for (final e in events)
+              if (_eventVisible(e, visible)) _eventJson(e, visible),
+          ],
+        };
+      },
+    ),
+    McpTool(
+      name: 'delete_task',
+      title: 'Delete task',
+      description:
+          'Deletes a task from every project it\'s in, with its subtasks and '
+          'attachments. This can\'t be undone.',
+      inputSchema: _object({'taskId': _taskId}, required: ['taskId']),
+      destructive: true,
+      run: (args) {
+        final task = _task(args);
+        tasks.delete(task.id);
+        return {'deleted': task.id, 'title': task.title};
+      },
+    ),
+  ];
+
+  /// The tool named [name], or null.
+  McpTool? named(String name) => all.where((t) => t.name == name).firstOrNull;
+
+  // Lookups. Projects and people can be named by id or (ignoring case)
+  // name; only what the profile using the app can see.
+
+  List<Project> get _projects =>
+      visibleProjects(projects.current(), profiles.current?.id);
+
+  Project _projectArg(Map<String, Object?> args) =>
+      _findProject(_requiredString(args, 'project'));
+
+  Project _findProject(String key) {
+    final visible = _projects;
+    return visible.where((p) => p.id == key).firstOrNull ??
+        visible
+            .where((p) => p.name.toLowerCase() == key.trim().toLowerCase())
+            .firstOrNull ??
+        (throw McpToolError(
+          'No project "$key". Projects: '
+          '${visible.map((p) => p.name).join(', ')}.',
+        ));
+  }
+
+  /// The board a call is about: the project named in args (one the task
+  /// is in), else the task's origin.
+  Project _board(Task task, Map<String, Object?> args) {
+    if (args['project'] case final String key) {
+      final p = _findProject(key);
+      if (!task.isIn(p.id)) {
+        throw McpToolError('The task isn\'t in "${p.name}".');
+      }
+      return p;
+    }
+    return projects.get(task.originId) ??
+        (throw const McpToolError('The task\'s project is gone.'));
+  }
+
+  TaskColumn _column(Project project, String key) =>
+      project.columns.where((c) => c.id == key).firstOrNull ??
+      project.columns
+          .where((c) => c.title.toLowerCase() == key.trim().toLowerCase())
+          .firstOrNull ??
+      (throw McpToolError(
+        '"${project.name}" has no column "$key". Columns: '
+        '${project.columns.map((c) => c.title).join(', ')}.',
+      ));
+
+  String _person(String key) {
+    final all = profiles.all();
+    return (all.where((p) => p.id == key).firstOrNull ??
+            all
+                .where(
+                  (p) =>
+                      p.displayName.toLowerCase() == key.trim().toLowerCase(),
+                )
+                .firstOrNull ??
+            (throw McpToolError(
+              'No person "$key". People: '
+              '${all.map((p) => p.displayName).join(', ')}.',
+            )))
+        .id;
+  }
+
+  Task _task(Map<String, Object?> args) {
+    final id = _requiredString(args, 'taskId');
+    final task = tasks.get(id);
+    final visible = {for (final p in _projects) p.id};
+    if (task == null || !task.projectIds.any(visible.contains)) {
+      throw McpToolError('No task "$id".');
+    }
+    return task;
+  }
+
+  bool _isPersonal(Task t) => projects.get(t.originId)?.isPersonal ?? false;
+
+  List<Task> _boardOrder(Project project) {
+    final index = {for (final (i, c) in project.columns.indexed) c.id: i};
+    int column(Task t) =>
+        index[project.columnFor(t.placementIn(project.id).status)] ?? 0;
+    return tasks.inProject(project.id)..sort((a, b) {
+      final byColumn = column(a).compareTo(column(b));
+      return byColumn != 0
+          ? byColumn
+          : a
+                .placementIn(project.id)
+                .order
+                .compareTo(b.placementIn(project.id).order);
+    });
+  }
+
+  // As JSON.
+
+  bool _eventVisible(TaskChangeEvent e, Map<String, Project> visible) =>
+      e.projectId != null
+      ? visible.containsKey(e.projectId)
+      : switch (tasks.get(e.taskId)) {
+          final t? => t.projectIds.any(visible.containsKey),
+          null => true,
+        };
+
+  Map<String, Object?> _eventJson(
+    TaskChangeEvent e,
+    Map<String, Project> visible,
+  ) {
+    final board = visible[e.projectId];
+    String? column(String? status) => board == null || status == null
+        ? null
+        : board.columns
+              .firstWhere((c) => c.id == board.columnFor(status))
+              .title;
+    return {
+      'seq': e.seq,
+      'kind': e.kind,
+      'taskId': e.taskId,
+      'title': e.title,
+      'at': e.at.toIso8601String(),
+      if (board != null) 'project': {'id': board.id, 'name': board.name},
+      if (board != null && e.kind != 'moved')
+        if (tasks.get(e.taskId) case final t? when t.isIn(board.id))
+          'column': column(t.placementIn(board.id).status),
+      if (e.kind == 'moved') ...{
+        'fromColumn': column(e.fromStatus),
+        'toColumn': column(e.toStatus),
+      },
+      if (e.changes.isNotEmpty) 'changes': e.changes,
+    };
+  }
+
+  Map<String, Object?> _projectJson(Project p) => {
+    'id': p.id,
+    'name': p.name,
+    'personal': p.isPersonal,
+    'columns': [
+      for (final c in p.columns) {'id': c.id, 'name': c.title},
+    ],
+    'taskCount': tasks.inProject(p.id).length,
+  };
+
+  String? _personName(String? id) =>
+      id == null ? null : profiles.get(id)?.displayName;
+
+  Map<String, Object?> _due(Task t) => {
+    'dueDate': t.dueDate == null ? null : formatDay(t.dueDate!),
+    'dueTime': t.dueDate == null || t.dueTime == null
+        ? null
+        : formatStoredTime(t.dueTime!),
+  };
+
+  Map<String, Object?> _taskSummary(Task t, Project board) {
+    final status = board.columnFor(t.placementIn(board.id).status);
+    return {
+      'id': t.id,
+      'title': t.title,
+      'project': board.name,
+      'column': board.columns.firstWhere((c) => c.id == status).title,
+      'completed': t.isCompletedIn(board.id),
+      'assignee': _personName(t.assigneeId),
+      ..._due(t),
+      'labels': t.tags,
+      if (t.subtasks.isNotEmpty)
+        'subtasks':
+            '${t.subtasks.where((s) => s.done).length}/${t.subtasks.length} done',
+    };
+  }
+
+  Map<String, Object?> _taskDetail(Task t) => {
+    'id': t.id,
+    'title': t.title,
+    'description': t.description,
+    'assignee': t.assigneeId == null
+        ? null
+        : {'id': t.assigneeId, 'name': _personName(t.assigneeId)},
+    ..._due(t),
+    'labels': t.tags,
+    'originProject': projects.get(t.originId)?.name,
+    'projects': [
+      for (final id in t.projectIds)
+        if (projects.get(id) case final p?)
+          {
+            'id': p.id,
+            'name': p.name,
+            'column': p.columns
+                .firstWhere(
+                  (c) => c.id == p.columnFor(t.placementIn(id).status),
+                )
+                .title,
+            'completed': t.isCompletedIn(id),
+          },
+    ],
+    'subtasks': [
+      for (final s in t.subtasks)
+        {'id': s.id, 'title': s.title, 'done': s.done},
+    ],
+    'attachments': [for (final a in t.attachments) a.name],
+    'createdAt': t.createdAt.toUtc().toIso8601String(),
+  };
+}
+
+// Argument reading.
+
+String _requiredString(Map<String, Object?> args, String key) =>
+    switch (args[key]) {
+      final String s when s.isNotEmpty => s,
+      _ => throw McpToolError('$key is required.'),
+    };
+
+List<String> _stringList(Object? value) => switch (value) {
+  null => const [],
+  final List list => [
+    for (final v in list)
+      if (v is String && v.trim().isNotEmpty) v.trim(),
+  ],
+  _ => throw const McpToolError('Expected a list of text.'),
+};
+
+DateTime? _day(Object? value) => switch (value) {
+  null => null,
+  final String s =>
+    parseDay(s.trim()) ??
+        (throw McpToolError('"$s" isn\'t a date like 2026-12-31.')),
+  _ => throw const McpToolError('dueDate must be text like 2026-12-31.'),
+};
+
+int? _time(Object? value) => switch (value) {
+  null => null,
+  final String s =>
+    parseStoredTime(s.trim()) ??
+        (throw McpToolError('"$s" isn\'t a time like 14:30.')),
+  _ => throw const McpToolError('dueTime must be text like 14:30.'),
+};
+
+// JSON Schema pieces.
+
+Map<String, Object?> _object(
+  Map<String, Object?> properties, {
+  List<String> required = const [],
+}) => {
+  'type': 'object',
+  'properties': properties,
+  if (required.isNotEmpty) 'required': required,
+};
+
+Map<String, Object?> _string(String description) => {
+  'type': 'string',
+  'description': description,
+};
+
+Map<String, Object?> _boolean(String description) => {
+  'type': 'boolean',
+  'description': description,
+};
+
+Map<String, Object?> _strings(String description) => {
+  'type': 'array',
+  'items': {'type': 'string'},
+  'description': description,
+};
+
+final _project = _string('The project (its id or name).');
+final _taskId = _string('The task\'s id.');

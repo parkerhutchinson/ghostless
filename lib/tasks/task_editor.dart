@@ -18,6 +18,7 @@ import 'label_colors.dart';
 import 'label_field.dart';
 import 'labels_sheet.dart';
 import 'project_labels.dart';
+import 'attachments.dart';
 import 'task.dart';
 import 'task_card.dart';
 import 'rich_text/rich_text_editor.dart';
@@ -80,8 +81,9 @@ const _gap = 16.0;
 /// by side.
 const taskEditorWidth = 520.0;
 
-/// Width of the Column and Assignee pickers, kept the same.
-const _pickerWidth = 220.0;
+/// Width of the Column and Assignee pickers: the same as the due date's
+/// box, so the three line up.
+const _pickerWidth = dueDateFieldWidth;
 
 /// Edits a task's title, description, column, labels and images. Changes are
 /// only saved with Save; Cancel discards them (including picked images).
@@ -231,7 +233,11 @@ class _TaskEditorState extends State<TaskEditor> {
   /// keep their first; the others are removed when saved.)
   late final List<String> _images = [...?widget.task?.images.take(1)];
 
-  /// Images copied in during this session; deleted again on cancel.
+  /// Its attachments (images and PDFs), in order.
+  late final List<Attachment> _attachments = [...?widget.task?.attachments];
+
+  /// Files (card image, attachments) copied in during this session;
+  /// deleted again on cancel.
   final Set<String> _added = {};
 
   /// The task as last saved here: [TaskEditor.task], or the one created
@@ -269,6 +275,7 @@ class _TaskEditorState extends State<TaskEditor> {
     'labelColors': _newLabelColors,
     'labelInput': _labelInput.text.trim(),
     'images': _images,
+    'attachments': [for (final a in _attachments) a.toJson()],
     'subtasks': [
       for (final s in _subtasks) [s.id, _titleOf(s).text.trim(), s.done],
     ],
@@ -353,13 +360,21 @@ class _TaskEditorState extends State<TaskEditor> {
         if (l.isNotEmpty && have.add(l.toLowerCase()))
           known[l.toLowerCase()] ?? l,
     ];
+    // A label from the project it's opened from (multi-homed) that the
+    // origin has no color for yet: it brings its color along, so it's
+    // the same in both.
+    final origin = widget.projectRepo?.get(_originId)?.labelColors ?? {};
+    final here = widget.projectId == _originId
+        ? const <String, int>{}
+        : widget.projectRepo?.get(widget.projectId)?.labelColors ?? {};
     setState(() {
       _labels.addAll(added);
-      if (color != null) {
-        for (final l in added) {
-          if (!known.containsKey(l.toLowerCase())) {
-            _newLabelColors[l.toLowerCase()] = color;
-          }
+      for (final l in added) {
+        final key = l.toLowerCase();
+        if (!known.containsKey(key)) {
+          if (color != null) _newLabelColors[key] = color;
+        } else if (!origin.containsKey(key) && here[key] != null) {
+          _newLabelColors[key] = here[key]!;
         }
       }
     });
@@ -389,6 +404,61 @@ class _TaskEditorState extends State<TaskEditor> {
     });
   }
 
+  /// Picks files to attach (images and PDFs), added after the others.
+  Future<void> _pickAttachments() async {
+    final files = await openFiles(
+      acceptedTypeGroups: const [
+        XTypeGroup(
+          label: 'Images and PDFs',
+          extensions: Attachment.extensions,
+          uniformTypeIdentifiers: ['public.image', 'com.adobe.pdf'],
+        ),
+      ],
+    );
+    final added = [
+      for (final f in files)
+        Attachment(file: await widget.repo.addImage(f.path), name: f.name),
+    ];
+    if (!mounted) {
+      for (final a in added) {
+        widget.repo.deleteImage(a.file);
+      }
+      return;
+    }
+    setState(() {
+      _attachments.addAll(added);
+      _added.addAll([for (final a in added) a.file]);
+    });
+  }
+
+  /// Removing attachments: each tile shows a ✕ (toggled by the ✎ by the
+  /// Attachments heading).
+  bool _editingAttachments = false;
+
+  /// The ✎ by the Attachments heading (✓ while editing); none without
+  /// attachments.
+  Widget? _attachmentsButton() {
+    if (_attachments.isEmpty) return null;
+    return IconButton(
+      tooltip: _editingAttachments ? 'Done' : 'Edit attachments',
+      iconSize: 15,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+      style: IconButton.styleFrom(
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: () =>
+          setState(() => _editingAttachments = !_editingAttachments),
+      icon: Icon(_editingAttachments ? Symbols.check : Symbols.edit),
+    );
+  }
+
+  /// Files of this task still in the form (the rest can be deleted).
+  Set<String> get _keptFiles => {
+    ..._images,
+    for (final a in _attachments) a.file,
+  };
+
   void _save() {
     if (!_canSave) return;
     if (_labelInput.text.trim().isNotEmpty) _addLabels(_labelInput.text);
@@ -403,6 +473,7 @@ class _TaskEditorState extends State<TaskEditor> {
         status: _status,
         tags: _labels,
         images: _images,
+        attachments: _attachments,
         originId: _originId,
         multiHomes: _validMultiHomes,
         dueDate: _dueDate,
@@ -414,8 +485,10 @@ class _TaskEditorState extends State<TaskEditor> {
       _task = repo.get(created.id) ?? created;
     } else {
       final task = _task!;
-      // Images removed in the editor are deleted only once the change is saved.
-      task.images.where((i) => !_images.contains(i)).forEach(repo.deleteImage);
+      // Files removed in the editor are deleted only once the change is
+      // saved.
+      final kept = _keptFiles;
+      task.files.where((f) => !kept.contains(f)).forEach(repo.deleteImage);
       repo.setMultiHomes(task.id, _validMultiHomes);
       if (_status != task.status) {
         // Bottom of the new column, on the board it was opened from only.
@@ -429,6 +502,7 @@ class _TaskEditorState extends State<TaskEditor> {
               description: description,
               tags: _labels,
               images: _images,
+              attachments: [..._attachments],
               dueDate: _dueDate,
               dueTime: _dueDate == null ? null : _dueTime,
               subtasks: subtasks,
@@ -443,7 +517,8 @@ class _TaskEditorState extends State<TaskEditor> {
       widget.projectRepo?.addLabels(id, _labels, colors: _newLabelColors);
     }
     // Picked and then removed again before saving; the rest are saved.
-    _added.where((i) => !_images.contains(i)).forEach(repo.deleteImage);
+    final kept = _keptFiles;
+    _added.where((f) => !kept.contains(f)).forEach(repo.deleteImage);
     _added.clear();
     // Stays open: only the arrow, Escape or clicking outside closes it.
     _savedTimer?.cancel();
@@ -473,7 +548,9 @@ class _TaskEditorState extends State<TaskEditor> {
   Widget _menu() {
     PopupMenuItem<VoidCallback> item(
       String label,
-      IconData icon,
+      // Null for none (Delete): a gap the icon's width keeps the label
+      // in line with the others.
+      IconData? icon,
       VoidCallback? action, {
       Color? color,
     }) => PopupMenuItem(
@@ -483,7 +560,10 @@ class _TaskEditorState extends State<TaskEditor> {
       child: Row(
         spacing: 10,
         children: [
-          Icon(icon, size: 18, color: action == null ? null : color),
+          if (icon == null)
+            const SizedBox(width: 18)
+          else
+            Icon(icon, size: 18, color: action == null ? null : color),
           Text(label, style: TextStyle(color: action == null ? null : color)),
         ],
       ),
@@ -501,7 +581,7 @@ class _TaskEditorState extends State<TaskEditor> {
         if (widget.onDelete != null)
           item(
             'Delete',
-            Symbols.delete,
+            null,
             _isNew ? null : _delete,
             color: Colors.red.shade300,
           ),
@@ -683,6 +763,23 @@ class _TaskEditorState extends State<TaskEditor> {
                             ),
                           ),
                           _section('Subtasks', _subtaskEditor()),
+                          _section(
+                            'Attachments',
+                            AttachmentGrid(
+                              attachments: _attachments,
+                              fileOf: (a) => widget.repo.imageFile(a.file),
+                              onAdd: _pickAttachments,
+                              editing: _editingAttachments,
+                              onRemove: (a) => setState(() {
+                                _attachments.remove(a);
+                                // Nothing left to edit.
+                                if (_attachments.isEmpty) {
+                                  _editingAttachments = false;
+                                }
+                              }),
+                            ),
+                            action: _attachmentsButton(),
+                          ),
                         ],
                       ),
                     ),
@@ -1121,6 +1218,7 @@ class _TaskEditorState extends State<TaskEditor> {
   /// color), with a ✕ to take it off.
   Widget _labelChip(String label) => LabelChip(
     label,
+    projectId: _originId,
     // A label picked here but not saved yet: the color picked for it.
     color: switch (_newLabelColors[label.toLowerCase()]) {
       final picked? => labelPalette[picked],
@@ -1148,6 +1246,7 @@ class _TaskEditorState extends State<TaskEditor> {
       LabelField(
         controller: _labelInput,
         focusNode: _labelFocus,
+        projectId: _originId,
         options: (text) =>
             labelOptions(text, known: _knownLabels, chosen: _labels),
         onAdd: _addLabels,
@@ -1274,24 +1373,27 @@ class _TaskEditorState extends State<TaskEditor> {
     if (name == null) {
       return SizedBox(
         height: 96,
-        child: OutlinedButton(
-          onPressed: _pickImage,
-          // Same faded white as the title and description placeholders,
-          // not the accent color.
-          style: OutlinedButton.styleFrom(
-            shape: RoundedRectangleBorder(borderRadius: formRadius),
-            side: BorderSide(color: context.colors.formBorder),
-            padding: EdgeInsets.zero,
-            foregroundColor: context.colors.placeholder,
-            overlayColor: context.colors.text,
-          ),
-          child: const Column(
-            mainAxisSize: MainAxisSize.min,
-            spacing: 4,
-            children: [
-              Icon(Symbols.add_photo_alternate),
-              Text('Add card image', style: TextStyle(fontSize: 12)),
-            ],
+        // A dashed outline, like the attachments' upload tile.
+        child: CustomPaint(
+          foregroundPainter: DashedBorder(context.colors.formBorder),
+          child: TextButton(
+            onPressed: _pickImage,
+            // Same faded white as the title and description placeholders,
+            // not the accent color.
+            style: TextButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: formRadius),
+              padding: EdgeInsets.zero,
+              foregroundColor: context.colors.placeholder,
+              overlayColor: context.colors.text,
+            ),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              spacing: 4,
+              children: [
+                Icon(Symbols.add_photo_alternate),
+                Text('Add card image', style: TextStyle(fontSize: 12)),
+              ],
+            ),
           ),
         ),
       );

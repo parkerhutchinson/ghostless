@@ -509,6 +509,16 @@ void main() {
       await tester.pump();
     }
 
+    testWidgets('Enter in the project name creates it', (tester) async {
+      await pump(tester);
+      await tester.tap(text('Create your first project'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Launch');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(text('Launch'), findsNWidgets(2)); // sidebar + header
+    });
+
     testWidgets('with no projects, offers to create the first one', (
       tester,
     ) async {

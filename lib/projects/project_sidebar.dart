@@ -146,8 +146,8 @@ class ProjectSidebar extends StatelessWidget {
           selected: activitySelected,
           onTap: onOpenActivity,
         ),
-        // The profile's own project, above the shared ones. It can be
-        // renamed, but not deleted.
+        // The profile's own project, above the shared ones. Nothing to
+        // edit: it can't be renamed, recolored or deleted.
         if (personal case final p?) ...[
           _SidebarItem(
             key: ValueKey(p.id),
@@ -158,7 +158,6 @@ class ProjectSidebar extends StatelessWidget {
             onTap: () => onSelect(p.id),
             acceptsTask: (t) => !t.isIn(p.id),
             onDropTask: (t) => onDropTask(t, p.id),
-            action: _EditButton(onPressed: () => onEdit(p)),
           ),
           const SizedBox(height: 12),
         ],

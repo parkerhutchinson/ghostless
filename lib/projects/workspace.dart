@@ -5,12 +5,15 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../activity/activity.dart';
 import '../activity/activity_page.dart';
 import '../activity/activity_repository.dart';
+import '../export/export_section.dart';
+import '../mcp/mcp_service.dart';
 import '../sync/sync_service.dart';
 import '../tasks/task.dart';
 import '../tasks/task_repository.dart';
 import '../layout.dart';
 import '../settings/settings_dialog.dart';
 import '../settings/settings_repository.dart';
+import '../tasks/form_buttons.dart';
 import '../tasks/tasks_page.dart';
 import '../widgets/undo_snack_bar.dart';
 import '../profiles/profile.dart';
@@ -34,7 +37,11 @@ class Workspace extends StatefulWidget {
     required this.profiles,
     required this.activity,
     this.sync,
+    this.mcp,
   });
+
+  /// The MCP server, turned on and off in Settings.
+  final McpService? mcp;
 
   /// The database connection, set up in Settings.
   final SyncService? sync;
@@ -94,6 +101,15 @@ class _WorkspaceState extends State<Workspace> {
     }
   }
 
+  /// A task to open once its project's board shows (from Activity).
+  String? _openTaskId;
+
+  /// From Activity: goes to [projectId]'s board and opens [task] there.
+  void _openTask(Task task, String projectId) {
+    _openTaskId = task.id;
+    _select(projectId);
+  }
+
   void _select(String? id) {
     setState(() => _selectedId = id);
     widget.store.put(_uiCollection, _uiKey, {'projectId': id});
@@ -113,13 +129,14 @@ class _WorkspaceState extends State<Workspace> {
     _select(project.id);
   }
 
-  /// The project's dialog: saves its name and color, or deletes it
-  /// (except a personal project).
+  /// The project's dialog: saves its name and color, or deletes it. Not
+  /// for a personal project, which has nothing to edit.
   Future<void> _edit(Project project) async {
+    if (project.isPersonal) return;
     final result = await showProjectDialog(
       context,
       project: project,
-      canDelete: !project.isPersonal,
+      canDelete: true,
     );
     if (result == null) return;
     if (result.delete) return _delete(project);
@@ -187,9 +204,7 @@ class _WorkspaceState extends State<Workspace> {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.red.shade700,
-              ),
+              style: deleteButtonStyle(),
               onPressed: () => Navigator.pop(context, true),
               child: const Text('Delete project'),
             ),
@@ -278,6 +293,12 @@ class _WorkspaceState extends State<Workspace> {
                   context,
                   widget.settings,
                   sync: widget.sync,
+                  export: ExportSources(
+                    projects: widget.projects,
+                    tasks: widget.tasks,
+                    profiles: widget.profiles,
+                  ),
+                  mcp: widget.mcp,
                 ),
               ),
             ),
@@ -293,6 +314,7 @@ class _WorkspaceState extends State<Workspace> {
                   profileId: profile.id,
                   projects: projects,
                   projectRepo: widget.projects,
+                  onOpenTask: _openTask,
                 )
               : selected == null
               ? Padding(
@@ -305,6 +327,8 @@ class _WorkspaceState extends State<Workspace> {
                   projectId: selected.id,
                   projects: projects,
                   projectRepo: widget.projects,
+                  openTaskId: _openTaskId,
+                  onTaskOpened: () => _openTaskId = null,
                 ),
         ),
       ],

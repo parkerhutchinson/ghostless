@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:codename/projects/project.dart';
 import 'package:codename/projects/project_logo.dart';
@@ -7,13 +8,13 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('checkLogoSize', () {
-    test('accepts square images up to 256', () {
+    test('accepts square images of any size', () {
       expect(checkLogoSize(256, 256), isNull);
       expect(checkLogoSize(32, 32), isNull);
+      expect(checkLogoSize(2048, 2048), isNull);
     });
-    test('turns down non-square and oversized images', () {
+    test('turns down non-square images', () {
       expect(checkLogoSize(256, 200), contains('square'));
-      expect(checkLogoSize(512, 512), contains('at most 256 × 256'));
       expect(checkLogoSize(0, 0), isNotNull);
     });
   });
@@ -55,19 +56,66 @@ void main() {
         throwsA(isA<LogoException>()),
       );
     });
-    test('turns down a file over the size limit', () async {
+    test('turns down files over the size limits', () async {
       await expectLater(
-        readLogo(Uint8List(maxLogoBytes + 1), 'a.png'),
+        readLogo(Uint8List(maxLogoBytes + 1), 'a.svg'),
+        throwsA(isA<LogoException>()),
+      );
+      await expectLater(
+        readLogo(Uint8List(maxLogoFileBytes + 1), 'a.png'),
         throwsA(isA<LogoException>()),
       );
     });
   });
 
+  group('readLogo (image)', () {
+    /// A [size] × [height] PNG, filled red.
+    Future<Uint8List> png(int size, [int? height]) async {
+      final recorder = ui.PictureRecorder();
+      ui.Canvas(recorder).drawRect(
+        ui.Rect.fromLTWH(0, 0, size.toDouble(), (height ?? size).toDouble()),
+        ui.Paint()..color = const ui.Color(0xFFFF0000),
+      );
+      final image = await recorder.endRecording().toImage(size, height ?? size);
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      return data!.buffer.asUint8List();
+    }
+
+    Future<(int, int)> sizeOf(Uint8List bytes) async {
+      final frame = await (await ui.instantiateImageCodec(bytes))
+          .getNextFrame();
+      return (frame.image.width, frame.image.height);
+    }
+
+    testWidgets('a big square image is scaled down to $maxLogoSize', (
+      tester,
+    ) async {
+      await tester.runAsync(() async {
+        final logo = await readLogo(await png(1024), 'big.png');
+        expect(logo.isSvg, isFalse);
+        expect(await sizeOf(logo.bytes), (maxLogoSize, maxLogoSize));
+      });
+    });
+
+    testWidgets('a small one is kept as it is', (tester) async {
+      await tester.runAsync(() async {
+        final bytes = await png(64);
+        expect((await readLogo(bytes, 'small.png')).bytes, same(bytes));
+      });
+    });
+
+    testWidgets('a wide one is turned down', (tester) async {
+      await tester.runAsync(() async {
+        await expectLater(
+          readLogo(await png(400, 300), 'wide.png'),
+          throwsA(isA<LogoException>()),
+        );
+      });
+    });
+  });
+
   test('a project keeps its logo through JSON; copyWith can clear it', () {
-    final logo = ProjectLogo(
-      bytes: Uint8List.fromList([1, 2, 3]),
-      isSvg: true,
-    );
+    final logo = ProjectLogo(bytes: Uint8List.fromList([1, 2, 3]), isSvg: true);
     final p = Project(
       id: 'p',
       name: 'Acme',

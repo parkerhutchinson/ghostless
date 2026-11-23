@@ -3,9 +3,36 @@ import 'package:codename/projects/project_repository.dart';
 import 'package:codename/tasks/label_colors.dart';
 import 'package:codename/tasks/label_field.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sync_engine/sync_engine.dart';
 
 void main() {
+  testWidgets('a label is in its own project\'s color, not another\'s', (
+    tester,
+  ) async {
+    final seen = <String, Color>{};
+    await tester.pumpWidget(
+      LabelColors(
+        byProject: const {
+          'a': {'bug': 3},
+          'b': {'bug': 5},
+        },
+        child: Builder(
+          builder: (context) {
+            for (final id in ['a', 'b', 'c']) {
+              seen[id] = LabelColors.of(context, 'Bug', id);
+            }
+            return const SizedBox();
+          },
+        ),
+      ),
+    );
+    expect(seen['a'], labelPalette[3]);
+    expect(seen['b'], labelPalette[5]);
+    // Not picked there: its default, not another project's pick.
+    expect(seen['c'], labelPalette[defaultLabelColor('Bug')]);
+  });
+
   group('labelOptions', () {
     const known = ['Bug', 'Design', 'design-review', 'Docs'];
 
@@ -44,8 +71,7 @@ void main() {
       expect(projects.get(p.id)!.labels, ['Bug', 'ui', 'Docs']);
     });
 
-    test('a new label keeps the color picked for it; the first one sticks',
-        () {
+    test('a new label keeps the color picked for it; the first one sticks', () {
       final p = projects.create('Acme');
       projects.addLabels(p.id, ['Bug'], colors: {'bug': 3});
       projects.addLabels(p.id, ['bug', 'Docs'], colors: {'bug': 5});
@@ -56,8 +82,12 @@ void main() {
     test('label colors round-trip through JSON', () {
       final p = projects.create('Acme').copyWith(labelColors: {'bug': 2});
       expect(Project.fromJson(p.id, p.toJson()).labelColors, {'bug': 2});
-      expect(Project.fromJson('x', {'labelColors': {'a': 'x'}}).labelColors,
-          isEmpty);
+      expect(
+        Project.fromJson('x', {
+          'labelColors': {'a': 'x'},
+        }).labelColors,
+        isEmpty,
+      );
     });
 
     test('16 hues, and the pickers show each exactly once', () {

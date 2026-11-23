@@ -191,6 +191,54 @@ void main() {
       expect(repo.imageFile(used).existsSync(), isTrue);
     });
 
+    test('attachments round-trip, and their files go with the task', () async {
+      final png = File('${dir.path}/photo.png')..writeAsBytesSync([1]);
+      final pdf = File('${dir.path}/spec.pdf')..writeAsBytesSync([2]);
+      final image = Attachment(
+        file: await repo.addImage(png.path),
+        name: 'photo.png',
+      );
+      final doc = Attachment(
+        file: await repo.addImage(pdf.path),
+        name: 'spec.pdf',
+      );
+      final t = repo.create(
+        originId: pid,
+        title: 'With files',
+        attachments: [image, doc],
+      );
+      final loaded = repo.get(t.id)!;
+      expect(loaded.attachments, [image, doc]);
+      expect(loaded.attachments.map((a) => a.isImage), [true, false]);
+
+      // A copy gets its own files.
+      final copy = (await repo.duplicate(t.id))!;
+      expect(copy.attachments.map((a) => a.name), ['photo.png', 'spec.pdf']);
+      expect(copy.attachments.first.file, isNot(image.file));
+
+      // Cleanup keeps files still attached; deleting removes them.
+      repo.deleteUnusedImages();
+      expect(repo.imageFile(doc.file).existsSync(), isTrue);
+      repo.delete(t.id);
+      expect(repo.imageFile(image.file).existsSync(), isFalse);
+      expect(repo.imageFile(doc.file).existsSync(), isFalse);
+      expect(repo.imageFile(copy.attachments.last.file).existsSync(), isTrue);
+    });
+
+    test('an attachment without a file is dropped when loading', () {
+      store.put('tasks', 'y', {
+        'title': 'Synced',
+        'attachments': [
+          {'file': 'a.pdf'},
+          {'name': 'no file'},
+          'junk',
+        ],
+      });
+      expect(repo.get('y')!.attachments, [
+        const Attachment(file: 'a.pdf', name: 'a.pdf'),
+      ]);
+    });
+
     test('tags, description and images round-trip through the store', () {
       final t = repo.create(
         originId: pid,

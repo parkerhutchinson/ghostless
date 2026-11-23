@@ -28,7 +28,12 @@ class ActivityPage extends StatefulWidget {
     required this.profileId,
     required this.projects,
     this.projectRepo,
+    this.onOpenTask,
   });
+
+  /// Shows [Task] on the board of the project given (switching to it) and
+  /// opens it there. Without it, the task opens over this page.
+  final void Function(Task task, String projectId)? onOpenTask;
 
   /// Where labels are kept, for the task form.
   final ProjectRepository? projectRepo;
@@ -98,6 +103,7 @@ class _ActivityPageState extends State<ActivityPage> {
       ...task.multiHomes,
     ].where(visible.contains).firstOrNull;
     if (board == null) return;
+    if (widget.onOpenTask case final open?) return open(task, board);
     showTaskEditor(
       context,
       widget.tasks,

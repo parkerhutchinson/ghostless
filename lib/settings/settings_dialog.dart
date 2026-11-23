@@ -2,6 +2,9 @@ import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../export/export_section.dart';
+import '../mcp/mcp_service.dart';
+import '../mcp/mcp_settings_section.dart';
 import '../sync/sync_service.dart';
 import '../sync/sync_settings.dart';
 import '../tasks/label_colors.dart';
@@ -15,72 +18,218 @@ Future<void> showSettingsDialog(
   BuildContext context,
   SettingsRepository settings, {
   SyncService? sync,
+  ExportSources? export,
+  McpService? mcp,
 }) => showDialog<void>(
   context: context,
   barrierColor: Colors.black54,
-  builder: (_) => _SettingsDialog(settings: settings, sync: sync),
+  builder: (_) =>
+      _SettingsDialog(settings: settings, sync: sync, export: export, mcp: mcp),
 );
 
-class _SettingsDialog extends StatelessWidget {
-  const _SettingsDialog({required this.settings, this.sync});
+/// The Settings window's height: the same on every tab.
+const settingsDialogHeight = 470.0;
+
+/// The Settings tabs.
+enum _Tab { theme, data, export, mcp }
+
+class _SettingsDialog extends StatefulWidget {
+  const _SettingsDialog({
+    required this.settings,
+    this.sync,
+    this.export,
+    this.mcp,
+  });
   final SettingsRepository settings;
 
-  /// The Sync section; left out when null (tests).
+  /// The MCP tab; left out when null (tests).
+  final McpService? mcp;
+
+  /// The Export tab; left out when null (tests).
+  final ExportSources? export;
+
+  /// The Data tab (Sync); left out when null (tests).
   final SyncService? sync;
 
   @override
+  State<_SettingsDialog> createState() => _SettingsDialogState();
+}
+
+class _SettingsDialogState extends State<_SettingsDialog> {
+  _Tab _tab = _Tab.theme;
+
+  /// The tabs there's something to show in.
+  List<_Tab> get _tabs => [
+    _Tab.theme,
+    if (widget.sync != null) _Tab.data,
+    if (widget.export != null) _Tab.export,
+    if (widget.mcp != null) _Tab.mcp,
+  ];
+
+  @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    final tabs = _tabs;
+    final theme = Theme.of(context);
+    // A plain Dialog, not an AlertDialog (which sizes itself to what's in
+    // it): always this tall, so switching tabs doesn't resize it. Padded
+    // like an AlertDialog.
+    return Dialog(
       backgroundColor: context.colors.surface,
       shape: formShape,
-      title: const Text('Settings'),
-      content: SizedBox(
-        width: 440,
-        // Scrolls when the window is too short for every section.
-        child: SingleChildScrollView(
+      child: SizedBox(
+        width: 440 + 48,
+        height: settingsDialogHeight,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             spacing: 16,
             children: [
-              StreamBuilder<Background?>(
-                stream: settings.watchBackground(),
-                initialData: settings.background,
-                builder: (context, snap) =>
-                    _BackgroundPicker(settings: settings, current: snap.data),
+              Text(
+                'Settings',
+                style:
+                    theme.dialogTheme.titleTextStyle ??
+                    theme.textTheme.headlineSmall,
               ),
-              StreamBuilder<Color>(
-                stream: settings.watchBackgroundColor(),
-                initialData: settings.backgroundColor,
-                builder: (context, snap) => _BackgroundColorPicker(
-                  settings: settings,
-                  current: snap.requireData,
+              if (tabs.length > 1) _switcher(tabs),
+              // The rest of the height; scrolls if a tab needs more.
+              Expanded(
+                child: _FadingScroll(
+                  // A fresh scroll position per tab.
+                  key: ValueKey(_tab),
+                  child: switch (_tab) {
+                    _Tab.theme => _theme(),
+                    _Tab.data => SyncSettingsSection(sync: widget.sync!),
+                    _Tab.export => ExportSection(sources: widget.export!),
+                    _Tab.mcp => McpSettingsSection(mcp: widget.mcp!),
+                  },
                 ),
               ),
-              StreamBuilder<Color>(
-                stream: settings.watchAccent(),
-                initialData: settings.accent,
-                builder: (context, snap) => _AccentPicker(
-                  settings: settings,
-                  current: snap.requireData,
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Done'),
                 ),
               ),
-              if (sync case final sync?) ...[
-                Divider(height: 8, color: context.colors.cardBorder),
-                SyncSettingsSection(sync: sync),
-              ],
             ],
           ),
         ),
       ),
-      actions: [
-        FilledButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Done'),
+    );
+  }
+
+  /// Theme · Data · Export, across the top: styled like the Board/List
+  /// switch.
+  Widget _switcher(List<_Tab> tabs) => SegmentedButton<_Tab>(
+    showSelectedIcon: false,
+    style: SegmentedButton.styleFrom(
+      visualDensity: VisualDensity.compact,
+      textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w400),
+      side: BorderSide(color: context.colors.cardBorder),
+      backgroundColor: context.colors.surface,
+      selectedBackgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+    ),
+    segments: [
+      for (final t in tabs)
+        ButtonSegment(
+          value: t,
+          icon: Icon(switch (t) {
+            _Tab.theme => Symbols.palette,
+            _Tab.data => Symbols.database,
+            _Tab.export => Symbols.download,
+            _Tab.mcp => Symbols.hub,
+          }, size: 16),
+          label: Text(switch (t) {
+            _Tab.theme => 'Theme',
+            _Tab.data => 'Data',
+            _Tab.export => 'Export',
+            _Tab.mcp => 'MCP',
+          }),
+        ),
+    ],
+    selected: {_tab},
+    onSelectionChanged: (s) => setState(() => _tab = s.single),
+  );
+
+  /// Background image, background color and accent.
+  Widget _theme() {
+    final settings = widget.settings;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: 16,
+      children: [
+        StreamBuilder<Background?>(
+          stream: settings.watchBackground(),
+          initialData: settings.background,
+          builder: (context, snap) =>
+              _BackgroundPicker(settings: settings, current: snap.data),
+        ),
+        StreamBuilder<Color>(
+          stream: settings.watchBackgroundColor(),
+          initialData: settings.backgroundColor,
+          builder: (context, snap) => _BackgroundColorPicker(
+            settings: settings,
+            current: snap.requireData,
+          ),
+        ),
+        StreamBuilder<Color>(
+          stream: settings.watchAccent(),
+          initialData: settings.accent,
+          builder: (context, snap) =>
+              _AccentPicker(settings: settings, current: snap.requireData),
         ),
       ],
     );
   }
+}
+
+/// Scrolls [child] with its bottom edge always faded out. Padding as tall
+/// as the fade comes after [child], so scrolled to the end, all of it
+/// shows clear of the fade. Only the content fades: the scrollbar sits
+/// over the fade, unfaded.
+class _FadingScroll extends StatefulWidget {
+  const _FadingScroll({super.key, required this.child});
+  final Widget child;
+
+  @override
+  State<_FadingScroll> createState() => _FadingScrollState();
+}
+
+class _FadingScrollState extends State<_FadingScroll> {
+  static const _fade = 32.0;
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scrollbar(
+    controller: _scroll,
+    child: ShaderMask(
+      // Opaque, then fading to clear over the last [_fade] pixels.
+      shaderCallback: (rect) => LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: const [Colors.black, Colors.black, Colors.transparent],
+        stops: [0, 1 - _fade / rect.height.clamp(_fade, double.infinity), 1],
+      ).createShader(rect),
+      blendMode: BlendMode.dstIn,
+      child: ScrollConfiguration(
+        // The scrollbar is the one outside the fade, above.
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: SingleChildScrollView(
+          controller: _scroll,
+          padding: const EdgeInsets.only(bottom: _fade),
+          child: widget.child,
+        ),
+      ),
+    ),
+  );
 }
 
 /// The image behind the window. Only the picture changes: the colors

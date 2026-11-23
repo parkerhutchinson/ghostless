@@ -7,6 +7,8 @@ import 'activity/activity_repository.dart';
 import 'app_theme.dart';
 import 'data/app_data.dart';
 import 'layout.dart';
+import 'mcp/mcp_service.dart';
+import 'mcp/mcp_tools.dart';
 import 'profiles/profile_repository.dart';
 import 'profiles/profiles_scope.dart';
 import 'projects/project_repository.dart';
@@ -85,6 +87,13 @@ Future<void> main() async {
   remind();
   Timer.periodic(const Duration(minutes: 1), (_) => remind());
 
+  // The MCP server for AI assistants, if it was left on in Settings.
+  final mcp = McpService(
+    data.store,
+    McpTools(tasks: tasks, projects: projects, profiles: profiles),
+  );
+  unawaited(mcp.restore());
+
   runApp(
     MainApp(
       data: data,
@@ -93,6 +102,7 @@ Future<void> main() async {
       projects: projects,
       profiles: profiles,
       activity: activity,
+      mcp: mcp,
     ),
   );
 }
@@ -106,8 +116,10 @@ class MainApp extends StatelessWidget {
     required this.projects,
     required this.profiles,
     required this.activity,
+    this.mcp,
   });
 
+  final McpService? mcp;
   final ProfileRepository profiles;
   final ActivityRepository activity;
   final AppData data;
@@ -187,6 +199,7 @@ class MainApp extends StatelessWidget {
                 profiles: profiles,
                 activity: activity,
                 sync: data.sync,
+                mcp: mcp,
               ),
             ),
             // Replaces the native title bar: drag to move, double-click to zoom.

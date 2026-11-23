@@ -13,6 +13,7 @@ import '../widgets/undo_snack_bar.dart';
 import 'task.dart';
 import 'task_board.dart';
 import 'task_card.dart';
+import 'form_buttons.dart';
 import 'task_editor.dart';
 import 'task_repository.dart';
 import '../app_theme.dart';
@@ -42,9 +43,16 @@ class TasksPage extends StatefulWidget {
     required this.projectId,
     this.projects = const [],
     required this.projectRepo,
+    this.openTaskId,
+    this.onTaskOpened,
   });
 
   final TaskRepository repo;
+
+  /// A task to open in the editor as soon as the page shows (e.g. one
+  /// clicked in Activity); [onTaskOpened] is called once it has been.
+  final String? openTaskId;
+  final VoidCallback? onTaskOpened;
 
   /// Shown in the header: the project's name.
   final String title;
@@ -97,6 +105,24 @@ class _TasksPageState extends State<TasksPage> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_onKey);
+    _openRequested();
+  }
+
+  @override
+  void didUpdateWidget(TasksPage old) {
+    super.didUpdateWidget(old);
+    if (widget.openTaskId != old.openTaskId) _openRequested();
+  }
+
+  /// Opens [TasksPage.openTaskId], after this frame (once the page is up).
+  void _openRequested() {
+    final id = widget.openTaskId;
+    if (id == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || widget.openTaskId != id) return;
+      widget.onTaskOpened?.call();
+      if (widget.repo.get(id) case final task?) _open(task);
+    });
   }
 
   @override
@@ -194,9 +220,7 @@ class _TasksPageState extends State<TasksPage> {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.red.shade700,
-              ),
+              style: deleteButtonStyle(),
               onPressed: () => Navigator.pop(context, true),
               child: const Text('Delete column'),
             ),
@@ -288,7 +312,7 @@ class _TasksPageState extends State<TasksPage> {
       onUndo: () => repo.save(task),
     ).closed.then((reason) {
       if (reason != SnackBarClosedReason.action && repo.get(task.id) == null) {
-        task.images.forEach(repo.deleteImage);
+        task.files.forEach(repo.deleteImage);
       }
     });
   }

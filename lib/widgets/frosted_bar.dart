@@ -15,13 +15,13 @@ const pageHeaderHeight = 40.0;
 /// Space above and below a page header's row, inside its glass.
 const _headerInset = titleBarHeight + 2;
 
-/// A page's header bar: clear frosted glass (the background blurred under
-/// a light white wash) across the pane's full width, from the top of the
-/// window, so the title reads over any background image. [child] sits
-/// below the title bar strip (which drags the window), centered in the
-/// rest; a little space separates it from the page below. With no
-/// background image there's nothing to frost: it's just the header on the
-/// background color. Either way, a line along its bottom.
+/// A page's header bar: frosted glass (the background blurred under a
+/// wash of the background color) across the pane's full width, from the
+/// top of the window, so the title reads over any background image.
+/// [child] sits below the title bar strip (which drags the window),
+/// centered in the rest; a little space separates it from the page below.
+/// With no background image there's nothing to frost: it's just the
+/// header on the background color. Either way, a line along its bottom.
 class FrostedBar extends StatelessWidget {
   const FrostedBar({super.key, required this.child});
   final Widget child;
@@ -75,8 +75,8 @@ class FrostedHeader extends StatelessWidget {
 }
 
 /// Frosted glass over a background image: the background blurred under a
-/// light white wash, with a half-white line along the bottom. On a plain
-/// background color, just the usual border line.
+/// wash of the background color. Either way, a line along the bottom in
+/// a tint of the background color (the usual border line).
 ///
 /// The blur is the background image itself, blurred once (see
 /// [blurredImage]) and drawn lined up with the window's. Not a
@@ -93,15 +93,12 @@ class _Glass extends StatelessWidget {
     final frosted = image != null;
     final box = DecoratedBox(
       decoration: BoxDecoration(
-        // White on purpose: frosted glass, whatever the background.
-        color: frosted ? Colors.white.withValues(alpha: 0.1) : null,
+        // Tinted with the background color picked in Settings.
+        color: frosted ? context.colors.surface.withValues(alpha: 0.5) : null,
         border: line
             ? Border(
-                bottom: BorderSide(
-                  color: frosted
-                      ? Colors.white.withValues(alpha: 0.3)
-                      : context.colors.cardBorder,
-                ),
+                // A tint of the background color, frosted or not.
+                bottom: BorderSide(color: context.colors.cardBorder),
               )
             : null,
       ),

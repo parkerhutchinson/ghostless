@@ -30,7 +30,7 @@ class DueDateField extends StatelessWidget {
       spacing: 8,
       children: [
         SizedBox(
-          width: 170,
+          width: dueDateFieldWidth,
           child: _DateField(
             date: date,
             // Emptying the box removes the due date, time included.
@@ -53,6 +53,10 @@ class DueDateField extends StatelessWidget {
     );
   }
 }
+
+/// Width of the date box (the task form's Column and Assignee pickers
+/// match it).
+const dueDateFieldWidth = 185.0;
 
 /// Size of the dropdown calendar: a 36px header, a 20px weekday row and
 /// 6 weeks of 30px rows, 7 columns of 34px, with 8px padding all round.

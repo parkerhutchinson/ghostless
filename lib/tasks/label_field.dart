@@ -45,12 +45,16 @@ class LabelField extends StatefulWidget {
     super.key,
     required this.controller,
     required this.focusNode,
+    required this.projectId,
     required this.options,
     required this.onAdd,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
+
+  /// The task's origin: the project whose label colors the list shows.
+  final String projectId;
   final List<LabelOption> Function(String text) options;
 
   /// Adds a label (or comma-separated labels), clearing the field; a new
@@ -177,6 +181,7 @@ class _LabelFieldState extends State<LabelField> {
                       options: options,
                       highlight: highlight,
                       onPick: _pick,
+                      projectId: widget.projectId,
                       createColor: _createColor,
                       onColor: (c) => setState(() => _newColor = c),
                     ),
@@ -229,12 +234,14 @@ class _LabelList extends StatelessWidget {
     required this.options,
     required this.highlight,
     required this.onPick,
+    required this.projectId,
     required this.createColor,
     required this.onColor,
   });
   final List<LabelOption> options;
   final int? highlight;
   final ValueChanged<LabelOption> onPick;
+  final String projectId;
 
   /// The color a new label is created in, and picking another.
   final int createColor;
@@ -292,6 +299,7 @@ class _LabelList extends StatelessWidget {
                         Flexible(
                           child: LabelChip(
                             option.label,
+                            projectId: projectId,
                             color: labelPalette[createColor],
                           ),
                         ),
@@ -299,7 +307,7 @@ class _LabelList extends StatelessWidget {
                     )
                   : Align(
                       alignment: Alignment.centerLeft,
-                      child: LabelChip(option.label),
+                      child: LabelChip(option.label, projectId: projectId),
                     ),
             ),
           );

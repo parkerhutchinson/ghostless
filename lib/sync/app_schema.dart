@@ -53,6 +53,7 @@ const appSchema = <String, Map<String, ValueKind>>{
     'order': ValueKind.number,
     'tags': ValueKind.stringList,
     'images': ValueKind.stringList,
+    'attachments': ValueKind.objectList,
     'originId': ValueKind.string,
     'projectIds': ValueKind.stringList,
     'dueDate': ValueKind.string,

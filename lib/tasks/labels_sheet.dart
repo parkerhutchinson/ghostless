@@ -227,15 +227,7 @@ class _LabelsSheetState extends State<LabelsSheet> {
         const Spacer(),
         FilledButton(
           style: _confirming
-              ? formButtonStyle.merge(
-                  FilledButton.styleFrom(
-                    // The red of the accent presets (Settings): the
-                    // first of them, around the color wheel.
-                    backgroundColor: labelPalette[labelPickerOrder.first],
-                    // Dark text, like the accent buttons.
-                    foregroundColor: accentText,
-                  ),
-                )
+              ? deleteButtonStyle().merge(formButtonStyle)
               : formButtonStyle,
           onPressed: _dirty ? _save : null,
           child: Text(_confirming ? 'Delete and save' : 'Save'),

@@ -82,10 +82,28 @@ personal project. Which profile is using this Mac is kept locally
   else.
 - A personal project is a `Project` with `ownerId` set to its profile. Use
   `visibleProjects(projects, profileId)` wherever projects are listed: it
-  hides other profiles' personal projects. Personal projects can be
-  renamed but not deleted.
+  hides other profiles' personal projects. Personal projects can't be
+  edited at all (no rename, color, logo or delete): the sidebar shows
+  no edit button for them.
 - The avatar (`ProfileAvatar`) is a circle by design, like the color dots.
 - Tasks point at a profile with `Task.assigneeId` (null = unassigned; an
   id with no matching profile also shows as unassigned). Widgets look
   profiles up through `ProfilesScope.maybeOf(context)`, which sits above
   the navigator so dialogs see it; `AssigneeAvatar` draws the avatar.
+
+## MCP server
+
+The app can run an MCP server for AI assistants (`lib/mcp/`), switched on
+in Settings › MCP. It listens on 127.0.0.1 only (default port 7429, path
+`/mcp`, Streamable HTTP, JSON responses, no SSE) and needs the bearer
+token shown in Settings. The switch, port and token are kept on this Mac
+(`ui/mcp`, not synced).
+
+- Tools (`McpTools`) go through the same repositories as the screens, so
+  changes appear live, record activity and sync. Never write the store
+  directly from a tool.
+- Tools act as the current profile and only see `visibleProjects`.
+- A tool's mistake (unknown task, bad date) throws `McpToolError`: it's
+  returned to the assistant as `isError`, not a protocol error.
+- When a task or project gains a field worth reading or setting, add it
+  to the tools' JSON and schemas.

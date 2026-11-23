@@ -31,7 +31,7 @@ class TaskRepository {
 
   final LocalStore _store;
 
-  /// Images attached to tasks are copied here.
+  /// Tasks' card images and attachments are copied here.
   final Directory imagesDir;
 
   /// All tasks, sorted by column order. Updates live.
@@ -82,6 +82,7 @@ class TaskRepository {
     String status = 'todo',
     List<String> tags = const [],
     List<String> images = const [],
+    List<Attachment> attachments = const [],
     required String originId,
     List<String> multiHomes = const [],
     DateTime? dueDate,
@@ -98,6 +99,7 @@ class TaskRepository {
       order: home.order,
       tags: tags,
       images: images,
+      attachments: attachments,
       originId: originId,
       projectIds: [
         ...{originId, ...multiHomes},
@@ -178,12 +180,10 @@ class TaskRepository {
     return before;
   }
 
-  /// Deletes the task and its image files. With [keepImages] the files stay
-  /// (so an undo can bring the task back whole); clean them up afterwards
-  /// with [deleteUnusedImages].
   /// Copies task [id]: the same details, subtasks and projects, titled
   /// "… (copy)", placed just below the original on every board it's on.
-  /// Its images are copied too, so deleting either task leaves the other's.
+  /// Its images and attachments are copied too, so deleting either task
+  /// leaves the other's.
   /// Returns the copy, or null if [id] doesn't exist.
   Future<Task?> duplicate(String id) async {
     final task = get(id);
@@ -191,10 +191,15 @@ class TaskRepository {
     final images = [
       for (final name in task.images) await addImage(imageFile(name).path),
     ];
+    final attachments = [
+      for (final a in task.attachments)
+        Attachment(file: await addImage(imageFile(a.file).path), name: a.name),
+    ];
     final copy = Task.fromJson(newId(), {
       ...task.toJson(),
       'title': '${task.title} (copy)',
       'images': images,
+      'attachments': [for (final a in attachments) a.toJson()],
       'subtasks': [
         for (final s in task.subtasks) {...s.toJson(), 'id': newId()},
       ],
@@ -213,12 +218,15 @@ class TaskRepository {
     return get(copy.id);
   }
 
+  /// Deletes the task and its files (images and attachments). With
+  /// [keepImages] the files stay (so an undo can bring the task back
+  /// whole); clean them up afterwards with [deleteUnusedImages].
   void delete(String id, {bool keepImages = false}) {
     final task = get(id);
     _store.delete(collection, id);
     if (task != null) onChange?.call(task, null);
     if (keepImages) return;
-    for (final name in task?.images ?? const <String>[]) {
+    for (final name in task?.files ?? const <String>[]) {
       deleteImage(name);
     }
   }
@@ -227,7 +235,7 @@ class TaskRepository {
   /// task, or by quitting before an undo expired).
   void deleteUnusedImages() {
     if (!imagesDir.existsSync()) return;
-    final used = {for (final t in current()) ...t.images};
+    final used = {for (final t in current()) ...t.files};
     for (final file in imagesDir.listSync().whereType<File>()) {
       if (!used.contains(file.uri.pathSegments.last)) file.deleteSync();
     }
@@ -354,7 +362,8 @@ class TaskRepository {
     save(task.withPlacement(board, (status: status, order: order)));
   }
 
-  /// Copies a picked image into the app's storage; returns its file name.
+  /// Copies a picked file (an image, or an attachment) into the app's
+  /// storage; returns its file name.
   Future<String> addImage(String sourcePath) async {
     await imagesDir.create(recursive: true);
     final dot = sourcePath.lastIndexOf('.');

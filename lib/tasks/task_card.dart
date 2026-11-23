@@ -416,7 +416,8 @@ class _TaskRowState extends State<TaskRow> {
                           spacing: 4,
                           runSpacing: 4,
                           children: [
-                            for (final tag in task.tags) LabelChip(tag),
+                            for (final tag in task.tags)
+                              LabelChip(tag, projectId: task.originId),
                           ],
                         ),
                       ),
@@ -515,7 +516,7 @@ class _CardMenu extends StatelessWidget {
             child: Row(
               spacing: 10,
               children: [
-                Icon(Symbols.delete, size: 18, color: Colors.red.shade300),
+                const SizedBox(width: 18), // No icon; in line with the rest.
                 Text(
                   shared ? 'Delete from all projects' : 'Delete',
                   style: TextStyle(color: Colors.red.shade300),
@@ -621,12 +622,16 @@ class _Body extends StatelessWidget {
           Wrap(
             spacing: 4,
             runSpacing: 4,
-            children: [for (final tag in task.tags) LabelChip(tag)],
+            children: [
+              for (final tag in task.tags)
+                LabelChip(tag, projectId: task.originId),
+            ],
           ),
         // Last, under everything else: the assignee at the left (a
         // button that opens a menu of every profile), the due date at the
         // right.
         if (task.dueDate != null ||
+            task.attachments.isNotEmpty ||
             (showAssignee && (task.assigneeId != null || onAssign != null)))
           Row(
             children: [
@@ -638,15 +643,22 @@ class _Body extends StatelessWidget {
               // All the room after the avatar, so a long date only ends
               // in "…" when it truly doesn't fit.
               Expanded(
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: task.dueDate == null
-                      ? null
-                      : _DueLabel(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  spacing: 10,
+                  children: [
+                    if (task.dueDate != null)
+                      Flexible(
+                        child: _DueLabel(
                           task: task,
                           completed: completed,
                           outlined: false,
                         ),
+                      ),
+                    // How many files are attached, after the date.
+                    if (task.attachments.isNotEmpty)
+                      _AttachmentCount(count: task.attachments.length),
+                  ],
                 ),
               ),
             ],
@@ -724,6 +736,40 @@ class _DueLabel extends StatelessWidget {
     );
     if (late == null) return label;
     return Tooltip(message: 'Due $dateText', child: label);
+  }
+}
+
+/// A paperclip and how many files a task has attached, styled like the
+/// due date beside it.
+class _AttachmentCount extends StatelessWidget {
+  const _AttachmentCount({required this.count});
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = context.colors.text;
+    return Tooltip(
+      message: '$count attachment${count == 1 ? '' : 's'}',
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          spacing: 3,
+          children: [
+            Icon(Symbols.attach_file, size: 13, color: color),
+            Text(
+              '$count',
+              style: TextStyle(
+                fontSize: 11.5,
+                color: color,
+                height: _chipLineHeight,
+                leadingDistribution: TextLeadingDistribution.even,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -825,17 +871,26 @@ class DoneButton extends StatelessWidget {
   }
 }
 
-/// A small colored label, in its color (see [LabelColors]), or [color]
-/// when given (one being picked).
+/// A small colored label, in its color in [projectId] (the task's origin;
+/// see [LabelColors]), or [color] when given (one being picked).
 class LabelChip extends StatelessWidget {
-  const LabelChip(this.tag, {super.key, this.onDeleted, this.color});
+  const LabelChip(
+    this.tag, {
+    super.key,
+    required this.projectId,
+    this.onDeleted,
+    this.color,
+  });
   final String tag;
+
+  /// The project whose colors it's in: its task's origin.
+  final String? projectId;
   final VoidCallback? onDeleted;
   final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    final color = this.color ?? LabelColors.of(context, tag);
+    final color = this.color ?? LabelColors.of(context, tag, projectId);
     return Container(
       padding: EdgeInsets.fromLTRB(7, 3, onDeleted == null ? 7 : 3, 3),
       decoration: BoxDecoration(
@@ -865,11 +920,7 @@ class LabelChip extends StatelessWidget {
               borderRadius: formRadius,
               child: Padding(
                 padding: const EdgeInsets.only(left: 2),
-                child: Icon(
-                  Symbols.close,
-                  size: 13,
-                  color: labelText(color),
-                ),
+                child: Icon(Symbols.close, size: 13, color: labelText(color)),
               ),
             ),
         ],
@@ -880,7 +931,7 @@ class LabelChip extends StatelessWidget {
 
 /// After a list row's title: a chevron and how many subtasks are done
 /// ("1/3"). Click to show or hide them under the row.
-class _SubtaskToggle extends StatelessWidget {
+class _SubtaskToggle extends StatefulWidget {
   const _SubtaskToggle({
     required this.subtasks,
     required this.expanded,
@@ -891,30 +942,53 @@ class _SubtaskToggle extends StatelessWidget {
   final VoidCallback? onPressed;
 
   @override
+  State<_SubtaskToggle> createState() => _SubtaskToggleState();
+}
+
+class _SubtaskToggleState extends State<_SubtaskToggle> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
+    final subtasks = widget.subtasks;
     final done = subtasks.where((s) => s.done).length;
+    final hovered = _hovered && widget.onPressed != null;
     return Tooltip(
-      message: expanded ? 'Hide subtasks' : 'Show subtasks',
+      message: widget.expanded ? 'Hide subtasks' : 'Show subtasks',
       waitDuration: const Duration(milliseconds: 600),
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: formRadius,
-        hoverColor: context.colors.hover,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(2, 2, 6, 2),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            spacing: 2,
-            children: [
-              Icon(
-                expanded ? Symbols.expand_more : Symbols.chevron_right,
-                size: 16,
+      child: MouseRegion(
+        cursor: widget.onPressed == null
+            ? MouseCursor.defer
+            : SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: widget.onPressed,
+          // Its own hover, stronger than the card's (which is shaded too
+          // while the pointer's over it), with an outline.
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(2, 2, 6, 2),
+            decoration: BoxDecoration(
+              color: hovered ? context.colors.hoverStrong : null,
+              borderRadius: formRadius,
+              border: Border.all(
+                color: hovered ? context.colors.cardBorder : Colors.transparent,
               ),
-              Text(
-                '$done/${subtasks.length}',
-                style: TextStyle(fontSize: 11.5, color: context.colors.text),
-              ),
-            ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: 2,
+              children: [
+                Icon(
+                  widget.expanded ? Symbols.expand_more : Symbols.chevron_right,
+                  size: 16,
+                ),
+                Text(
+                  '$done/${subtasks.length}',
+                  style: TextStyle(fontSize: 11.5, color: context.colors.text),
+                ),
+              ],
+            ),
           ),
         ),
       ),

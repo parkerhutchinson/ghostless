@@ -8,12 +8,17 @@ import 'package:material_ui/material_ui.dart';
 import '../app_theme.dart';
 import 'project.dart';
 
-/// Largest logo, in pixels each way. Logos are stored in the project
-/// itself (so they sync), which keeps them small.
+/// A stored logo's size, at most, in pixels each way. Logos are stored in
+/// the project itself (so they sync), which keeps them small: a bigger
+/// image is scaled down to this when it's picked.
 const maxLogoSize = 256;
 
-/// Largest logo file, in bytes.
+/// Largest SVG logo, in bytes (it's stored as it is).
 const maxLogoBytes = 256 * 1024;
+
+/// Largest image file that can be picked as a logo, in bytes (before it's
+/// scaled down).
+const maxLogoFileBytes = 20 * 1024 * 1024;
 
 /// File types a logo can be.
 const logoExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
@@ -61,16 +66,13 @@ final class LogoException implements Exception {
   String toString() => message;
 }
 
-/// Null when an image [width] × [height] can be a logo; otherwise why not.
+/// Null when an image [width] × [height] can be a logo (any square: a big
+/// one is scaled down); otherwise why not.
 String? checkLogoSize(num width, num height) {
   if (width <= 0 || height <= 0) return "Couldn't read the image's size.";
   if (width != height) {
     return 'The logo must be square (this one is '
         '${_px(width)} × ${_px(height)}).';
-  }
-  if (width > maxLogoSize) {
-    return 'The logo can be at most $maxLogoSize × $maxLogoSize '
-        '(this one is ${_px(width)} × ${_px(height)}).';
   }
   return null;
 }
@@ -103,16 +105,17 @@ String _px(num n) => n == n.roundToDouble() ? '${n.round()}' : '$n';
   return w == null || h == null ? null : (w, h);
 }
 
-/// Checks [bytes] (from a file named [fileName]) as a logo: square, at most
-/// [maxLogoSize] each way (an SVG only needs to be square, as it scales).
+/// Checks [bytes] (from a file named [fileName]) as a logo: it must be
+/// square. An image bigger than [maxLogoSize] each way is scaled down to
+/// it (as a PNG), so only that much is stored; an SVG is kept as it is.
 /// Throws a [LogoException] saying what's wrong.
 Future<ProjectLogo> readLogo(Uint8List bytes, String fileName) async {
-  if (bytes.length > maxLogoBytes) {
-    throw LogoException(
-      'The logo file is too big (at most ${maxLogoBytes ~/ 1024} KB).',
-    );
-  }
   if (fileName.toLowerCase().endsWith('.svg')) {
+    if (bytes.length > maxLogoBytes) {
+      throw LogoException(
+        'The SVG is too big (at most ${maxLogoBytes ~/ 1024} KB).',
+      );
+    }
     final String text;
     try {
       text = utf8.decode(bytes);
@@ -132,21 +135,57 @@ Future<ProjectLogo> readLogo(Uint8List bytes, String fileName) async {
     return ProjectLogo(bytes: bytes, isSvg: true);
   }
 
-  final int width, height;
+  if (bytes.length > maxLogoFileBytes) {
+    throw LogoException(
+      'The image is too big (at most ${maxLogoFileBytes ~/ (1024 * 1024)} MB).',
+    );
+  }
+  final ui.Image image;
   try {
     final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    width = frame.image.width;
-    height = frame.image.height;
-    frame.image.dispose();
+    image = (await codec.getNextFrame()).image;
     codec.dispose();
   } catch (_) {
     throw const LogoException("That image couldn't be read.");
   }
-  if (checkLogoSize(width, height) case final problem?) {
-    throw LogoException(problem);
+  try {
+    if (checkLogoSize(image.width, image.height) case final problem?) {
+      throw LogoException(problem);
+    }
+    // Small enough already: kept as it is (an animated GIF stays animated).
+    if (image.width <= maxLogoSize && bytes.length <= maxLogoBytes) {
+      return ProjectLogo(bytes: bytes, isSvg: false);
+    }
+    return ProjectLogo(
+      bytes: await _shrink(image, image.width.clamp(1, maxLogoSize)),
+      isSvg: false,
+    );
+  } finally {
+    image.dispose();
   }
-  return ProjectLogo(bytes: bytes, isSvg: false);
+}
+
+/// [image] drawn at [size] × [size] (smoothly), as a PNG.
+Future<Uint8List> _shrink(ui.Image image, int size) async {
+  final recorder = ui.PictureRecorder();
+  ui.Canvas(recorder).drawImageRect(
+    image,
+    Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+    Rect.fromLTWH(0, 0, size.toDouble(), size.toDouble()),
+    Paint()
+      ..filterQuality = FilterQuality.high
+      ..isAntiAlias = true,
+  );
+  final picture = recorder.endRecording();
+  final small = await picture.toImage(size, size);
+  picture.dispose();
+  try {
+    final png = await small.toByteData(format: ui.ImageByteFormat.png);
+    if (png == null) throw const LogoException("That image couldn't be read.");
+    return png.buffer.asUint8List();
+  } finally {
+    small.dispose();
+  }
 }
 
 /// A project's mark: a rounded square in its color, [size] each way, with

@@ -559,7 +559,9 @@ class _ColumnMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     PopupMenuItem<VoidCallback> item(
       String label,
-      IconData icon,
+      // Null for none (Delete): a gap the icon's width keeps the label
+      // in line with the others.
+      IconData? icon,
       VoidCallback? action, {
       Color? color,
     }) => PopupMenuItem(
@@ -569,7 +571,10 @@ class _ColumnMenu extends StatelessWidget {
       child: Row(
         spacing: 10,
         children: [
-          Icon(icon, size: 18, color: action == null ? null : color),
+          if (icon == null)
+            const SizedBox(width: 18)
+          else
+            Icon(icon, size: 18, color: action == null ? null : color),
           Text(label, style: TextStyle(color: action == null ? null : color)),
         ],
       ),
@@ -593,12 +598,7 @@ class _ColumnMenu extends StatelessWidget {
       onSelected: (action) => action(),
       itemBuilder: (_) => [
         item('Rename', Symbols.edit, onRename),
-        item(
-          'Delete $noun',
-          Symbols.delete,
-          onDelete,
-          color: Colors.red.shade300,
-        ),
+        item('Delete $noun', null, onDelete, color: Colors.red.shade300),
       ],
     );
   }

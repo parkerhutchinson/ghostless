@@ -34,6 +34,45 @@ const defaultColumns = [
   TaskColumn('done', 'Done'),
 ];
 
+/// A file attached to a task (an image or a PDF): the copy kept in the
+/// app's file folder ([file], see [TaskRepository.imageFile]) and the name
+/// it was picked with ([name]), shown on its tile.
+final class Attachment {
+  const Attachment({required this.file, required this.name});
+
+  final String file;
+  final String name;
+
+  /// File types that can be attached.
+  static const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'];
+  static const extensions = [...imageExtensions, 'pdf'];
+
+  String get extension {
+    final dot = file.lastIndexOf('.');
+    return dot == -1 ? '' : file.substring(dot + 1).toLowerCase();
+  }
+
+  /// Shown as a picture (anything else is a document, opened in its app).
+  bool get isImage => imageExtensions.contains(extension);
+
+  Map<String, Object?> toJson() => {'file': file, 'name': name};
+
+  /// Null for anything that isn't a stored attachment.
+  static Attachment? fromJson(Object? json) => switch (json) {
+    {'file': final String file} when file.isNotEmpty => Attachment(
+      file: file,
+      name: json['name'] as String? ?? file,
+    ),
+    _ => null,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is Attachment && other.file == file && other.name == name;
+  @override
+  int get hashCode => Object.hash(file, name);
+}
+
 /// A step within a task: a title and whether it's done. Stored inside its
 /// task (see [Task.subtasks]), in the order the user arranged them.
 final class Subtask {
@@ -78,6 +117,7 @@ final class Task {
     this.order = 0,
     this.tags = const [],
     this.images = const [],
+    this.attachments = const [],
     required this.originId,
     required this.projectIds,
     this.dueDate,
@@ -112,6 +152,16 @@ final class Task {
 
   /// File names in the app's image folder (see [TaskRepository.imageFile]).
   final List<String> images;
+
+  /// Files attached to it (images and PDFs), in the order added.
+  final List<Attachment> attachments;
+
+  /// Every file of its own in the app's file folder: [images] and the
+  /// [attachments]' copies.
+  Iterable<String> get files => [
+    ...images,
+    for (final a in attachments) a.file,
+  ];
 
   /// The project the task was created in. It always stays there: only
   /// deleting this project deletes the task.
@@ -199,6 +249,7 @@ final class Task {
     double? order,
     List<String>? tags,
     List<String>? images,
+    List<Attachment>? attachments,
     String? originId,
     List<String>? projectIds,
     // Object? so that null can mean "clear it"; omitted means "keep it".
@@ -216,6 +267,7 @@ final class Task {
     order: order ?? this.order,
     tags: tags ?? this.tags,
     images: images ?? this.images,
+    attachments: attachments ?? this.attachments,
     originId: originId ?? this.originId,
     projectIds: projectIds ?? this.projectIds,
     dueDate: dueDate == _keep ? this.dueDate : dueDate as DateTime?,
@@ -234,6 +286,7 @@ final class Task {
     'order': order,
     'tags': tags,
     'images': images,
+    'attachments': [for (final a in attachments) a.toJson()],
     'originId': originId,
     'projectIds': projectIds,
     'dueDate': dueDate == null ? null : formatDay(dueDate!),
@@ -276,6 +329,10 @@ final class Task {
       order: (json['order'] as num?)?.toDouble() ?? 0,
       tags: [...?(json['tags'] as List?)?.whereType<String>()],
       images: [...?(json['images'] as List?)?.whereType<String>()],
+      attachments: [
+        for (final a in json['attachments'] as List? ?? const [])
+          ?Attachment.fromJson(a),
+      ],
       originId: origin,
       projectIds: [
         if (origin.isNotEmpty) origin,
