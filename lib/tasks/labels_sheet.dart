@@ -7,6 +7,7 @@ import 'form_buttons.dart';
 import 'label_colors.dart';
 import 'label_field.dart' show LabelLengthFormatter;
 import 'project_labels.dart';
+import '../widgets/selected_text.dart';
 
 /// One label as edited in [LabelsSheet], applied only on Save.
 class _Draft {
@@ -256,7 +257,7 @@ class _LabelRow extends StatefulWidget {
 }
 
 class _LabelRowState extends State<_LabelRow> {
-  late final _name = TextEditingController(text: widget.draft.name);
+  late final _name = AppTextController(text: widget.draft.name);
 
   @override
   void dispose() {

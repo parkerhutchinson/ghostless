@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../app_theme.dart';
 import 'due_date.dart';
+import '../widgets/selected_text.dart';
 
 /// Faded white, like the form's placeholders.
 
@@ -100,7 +101,7 @@ class _DateField extends StatefulWidget {
 }
 
 class _DateFieldState extends State<_DateField> {
-  late final _controller = TextEditingController(text: _label(widget.date))
+  late final _controller = AppTextController(text: _label(widget.date))
     ..addListener(_onTyped);
   final _focus = FocusNode();
   final _calendar = OverlayPortalController();
@@ -258,7 +259,7 @@ class _TimeField extends StatefulWidget {
 }
 
 class _TimeFieldState extends State<_TimeField> {
-  late final _controller = TextEditingController(text: _label(widget.time));
+  late final _controller = AppTextController(text: _label(widget.time));
   final _focus = FocusNode();
 
   /// The option last scrolled into view, so it's only done when the

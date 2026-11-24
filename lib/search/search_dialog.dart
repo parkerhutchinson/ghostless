@@ -11,6 +11,7 @@ import '../tasks/due_date.dart';
 import '../tasks/label_line.dart';
 import '../tasks/task_repository.dart';
 import 'task_search.dart';
+import '../widgets/selected_text.dart';
 
 /// Search (⌘K, or the magnifying glass): finds tasks in [projects] by
 /// title, label or assignee (one at a time, picked by the toggle under
@@ -64,7 +65,7 @@ class _SearchDialogState extends State<_SearchDialog> {
 
   static const _maxListHeight = _rowHeight * 7;
 
-  final _query = TextEditingController();
+  final _query = AppTextController();
 
   /// The field keeps the focus, even after a click on the toggle.
   final _queryFocus = FocusNode();
@@ -143,20 +144,34 @@ class _SearchDialogState extends State<_SearchDialog> {
     }
   }
 
+  /// How far down the window the box sits.
+  static const _topFraction = 0.34;
+
+  /// The most the results can show: [_maxListHeight], or less in a
+  /// short window, so they end above its bottom.
+  double _listMax = _maxListHeight;
+
   @override
   Widget build(BuildContext context) {
     final words = searchWords(_query.text);
+    final window = MediaQuery.sizeOf(context).height;
+    final top = window * _topFraction;
     final muted = TextStyle(fontSize: 13, color: context.colors.mutedText);
     return Align(
       alignment: Alignment.topCenter,
       child: Padding(
         padding: EdgeInsets.only(
-          top: 288,
+          // A share of the window's height, so it moves as that changes.
+          top: top,
           left: widget.paneLeft + 24,
           right: 24,
         ),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: _width),
+          // Room down to the window's bottom, less a margin.
+          constraints: BoxConstraints(
+            maxWidth: _width,
+            maxHeight: (window - top - 24).clamp(0, double.infinity),
+          ),
           child: Material(
             color: context.colors.surface,
             shape: RoundedRectangleBorder(
@@ -184,32 +199,39 @@ class _SearchDialogState extends State<_SearchDialog> {
                         child: Text('No tasks match.', style: muted),
                       )
                     else
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(
-                          maxHeight: _maxListHeight,
-                        ),
-                        child: _bottomFade(
-                          ListView.builder(
-                            controller: _scroll,
-                            shrinkWrap: true,
-                            // Room below the last row to scroll it out
-                            // of the fade.
-                            padding: EdgeInsets.only(
-                              bottom: _overflows ? _fadeHeight : 0,
-                            ),
-                            itemExtent: _rowHeight,
-                            itemCount: _hits.length,
-                            itemBuilder: (context, i) => _ResultRow(
-                              hit: _hits[i],
-                              // By date: no words to pick out of titles.
-                              words: _field == SearchField.date
-                                  ? const []
-                                  : words,
-                              highlighted: i == _index,
-                              onHover: () => setState(() => _index = i),
-                              onTap: () => _open(_hits[i]),
-                            ),
-                          ),
+                      Flexible(
+                        child: LayoutBuilder(
+                          builder: (context, space) {
+                            _listMax = space.maxHeight < _maxListHeight
+                                ? space.maxHeight
+                                : _maxListHeight;
+                            return ConstrainedBox(
+                              constraints: BoxConstraints(maxHeight: _listMax),
+                              child: _bottomFade(
+                                ListView.builder(
+                                  controller: _scroll,
+                                  shrinkWrap: true,
+                                  // Room below the last row to scroll it out
+                                  // of the fade.
+                                  padding: EdgeInsets.only(
+                                    bottom: _overflows ? _fadeHeight : 0,
+                                  ),
+                                  itemExtent: _rowHeight,
+                                  itemCount: _hits.length,
+                                  itemBuilder: (context, i) => _ResultRow(
+                                    hit: _hits[i],
+                                    // By date: no words to pick out of titles.
+                                    words: _field == SearchField.date
+                                        ? const []
+                                        : words,
+                                    highlighted: i == _index,
+                                    onHover: () => setState(() => _index = i),
+                                    onTap: () => _open(_hits[i]),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ),
                   ],
@@ -223,7 +245,7 @@ class _SearchDialogState extends State<_SearchDialog> {
   }
 
   /// More results than fit: they fade out at the bottom.
-  bool get _overflows => _hits.length * _rowHeight > _maxListHeight;
+  bool get _overflows => _hits.length * _rowHeight > _listMax;
 
   /// The results fade out at the bottom when there are more than fit. The
   /// fade stays put; padding below the last row lets it scroll clear.

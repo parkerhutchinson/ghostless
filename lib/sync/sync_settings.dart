@@ -9,6 +9,7 @@ import 'compatibility.dart';
 import 'remote_config.dart';
 import 'sync_service.dart';
 import '../widgets/sliding_toggle.dart';
+import '../widgets/selected_text.dart';
 
 /// The Sync section of Settings: where the app syncs to (or that it's
 /// local-only), with buttons to connect, sync now, change or disconnect.
@@ -237,7 +238,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
 
   TextEditingController _controller(_Field field) => _controllers.putIfAbsent(
     '${_kind.name}.${field.key}',
-    () => TextEditingController(text: field.initial),
+    () => AppTextController(text: field.initial),
   );
 
   /// The settings as typed.

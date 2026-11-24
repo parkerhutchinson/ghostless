@@ -241,6 +241,66 @@ void main() {
       );
     }
 
+    group('undo', () {
+      var now = DateTime(2026);
+      RichTextController make(String md) {
+        final c = RichTextController.fromMarkdown(md, clock: () => now);
+        return c..selection = TextSelection.collapsed(offset: c.text.length);
+      }
+
+      test('takes formatting back too, and redo puts it back', () {
+        final c = make('Hello')
+          ..selection = const TextSelection(baseOffset: 0, extentOffset: 5);
+        c.toggle(b);
+        c.setHeading(1);
+        expect(c.toMarkdown(), '# **Hello**');
+        c.undo();
+        expect(c.toMarkdown(), '**Hello**');
+        c.undo();
+        expect(c.toMarkdown(), 'Hello');
+        expect(
+          c.selection,
+          const TextSelection(baseOffset: 0, extentOffset: 5),
+        );
+        expect(c.canUndo, isFalse);
+        c.redo();
+        c.redo();
+        expect(c.toMarkdown(), '# **Hello**');
+      });
+
+      test('a typing run is one step; a pause starts another', () {
+        final c = make('');
+        type(c, 'a');
+        now = now.add(const Duration(milliseconds: 300));
+        type(c, 'b');
+        now = now.add(const Duration(seconds: 2));
+        type(c, 'c');
+        c.undo();
+        expect(c.text, 'ab');
+        c.undo();
+        expect(c.text, '');
+      });
+
+      test('deleting bold text and undoing brings the bold back', () {
+        final c = make('**bold** text');
+        c.value = const TextEditingValue(
+          text: ' text',
+          selection: TextSelection.collapsed(offset: 0),
+        );
+        c.undo();
+        expect(c.toMarkdown(), '**bold** text');
+      });
+
+      test('a new change clears redo', () {
+        final c = make('x');
+        type(c, 'y');
+        c.undo();
+        expect(c.canRedo, isTrue);
+        c.toggleList(ListKind.bullet);
+        expect(c.canRedo, isFalse);
+      });
+    });
+
     test('bold on with nothing selected applies to what’s typed', () {
       final c = RichTextController.fromMarkdown('Hi ')
         ..selection = const TextSelection.collapsed(offset: 3);
@@ -283,6 +343,76 @@ void main() {
     test('addresses without a scheme get https', () {
       expect(normalizeUrl(' example.com '), 'https://example.com');
       expect(normalizeUrl('mailto:a@b.c'), 'mailto:a@b.c');
+    });
+  });
+
+  group('headings', () {
+    test('read and write as # to ###', () {
+      final m = RichTextModel.fromMarkdown('# Big\n## Mid\n### Small\nplain');
+      expect(m.text, 'Big\nMid\nSmall\nplain');
+      expect(m.headings, [1, 2, 3, 0]);
+      expect(m.toMarkdown(), '# Big\n## Mid\n### Small\nplain');
+    });
+
+    test('nothing past ###; a plain line starting with # is escaped', () {
+      expect(RichTextModel.fromMarkdown('#### four').headings, [0]);
+      final m = RichTextModel('# not a heading\n## nor this');
+      final back = RichTextModel.fromMarkdown(m.toMarkdown());
+      expect(back.text, m.text);
+      expect(back.headings, [0, 0]);
+      // A heading's own text can start with "#".
+      final h = RichTextModel('# hash', const [], [2]);
+      final hb = RichTextModel.fromMarkdown(h.toMarkdown());
+      expect(hb.text, '# hash');
+      expect(hb.headings, [2]);
+    });
+
+    test('set over the selected lines; a list item stops being one', () {
+      final m = RichTextModel('• one\n• two\nthree');
+      m.setHeading(2, 8, 2);
+      expect(m.text, 'one\ntwo\nthree');
+      expect(m.headings, [2, 2, 0]);
+      expect(m.headingAt(0), 2);
+      m.setHeading(4, 4, 0);
+      expect(m.headings, [2, 0, 0]);
+    });
+
+    test('making a list takes the heading off', () {
+      final m = RichTextModel('Title\nbody', const [], [1, 0]);
+      m.toggleList(0, 0, ListKind.bullet);
+      expect(m.text, '• Title\nbody');
+      expect(m.headings, [0, 0]);
+    });
+
+    test('Return at the end of a heading starts plain text', () {
+      final m = RichTextModel('Title', const [], [1]);
+      m.paragraph(5, 5);
+      expect(m.text, 'Title\n\n');
+      expect(m.headings, [1, 0, 0]);
+    });
+
+    test('Return at the start of a heading moves it down with its text', () {
+      final m = RichTextModel('Title', const [], [1]);
+      m.replace(0, 0, '\n');
+      expect(m.headings, [0, 1]);
+    });
+
+    test('joining lines keeps the first one\'s level', () {
+      final m = RichTextModel('Title\nbody', const [], [1, 0]);
+      m.replace(5, 6, '');
+      expect(m.text, 'Titlebody');
+      expect(m.headings, [1]);
+      // Whole lines taken out: the next one keeps its own.
+      final n = RichTextModel('gone\nTitle', const [], [0, 2]);
+      n.replace(0, 5, '');
+      expect(n.headings, [2]);
+    });
+
+    test('a pasted line break splits off plain lines', () {
+      final m = RichTextModel('Title', const [], [3]);
+      m.replace(2, 2, 'a\nb\nc');
+      expect(m.text, 'Tia\nb\nctle');
+      expect(m.headings, [3, 0, 0]);
     });
   });
 }

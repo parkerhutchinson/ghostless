@@ -26,6 +26,7 @@ import 'task_repository.dart';
 import '../app_theme.dart';
 import '../widgets/left_menu_button.dart';
 import '../widgets/undo_snack_bar.dart';
+import '../widgets/selected_text.dart';
 
 /// Opens the editor for [task], or for a new task in [status] when [task]
 /// is null. [projectId] is the project it's opened from: the task is always
@@ -200,15 +201,15 @@ final _chipSizedButton = formButtonStyle;
 const _descriptionFontSize = 12.0;
 
 class _TaskEditorState extends State<TaskEditor> {
-  late final _title = TextEditingController(text: widget.task?.title);
+  late final _title = AppTextController(text: widget.task?.title);
 
   /// Bold, italic, links and lists; saved as Markdown.
   late final _description = RichTextController.fromMarkdown(
     widget.task?.description ?? '',
   );
-  final _labelInput = TextEditingController();
+  final _labelInput = AppTextController();
   final _labelFocus = FocusNode();
-  final _projectInput = TextEditingController();
+  final _projectInput = AppTextController();
   final _projectFocus = FocusNode();
   late String _status = widget.task?.status ?? widget.initialStatus;
 
@@ -240,7 +241,7 @@ class _TaskEditorState extends State<TaskEditor> {
 
   /// Each subtask's title field, by subtask id.
   final _subtaskTitles = <String, TextEditingController>{};
-  final _subtaskInput = TextEditingController();
+  final _subtaskInput = AppTextController();
   final _subtaskFocus = FocusNode();
 
   /// The subtask row under the pointer: it shows its ✕.
@@ -248,7 +249,7 @@ class _TaskEditorState extends State<TaskEditor> {
 
   TextEditingController _titleOf(Subtask s) => _subtaskTitles.putIfAbsent(
     s.id,
-    () => TextEditingController(text: s.title)..addListener(_changed),
+    () => AppTextController(text: s.title)..addListener(_changed),
   );
 
   void _addSubtask(String text) {
@@ -822,14 +823,12 @@ class _TaskEditorState extends State<TaskEditor> {
                               child: _imageEditor(),
                             ),
                           ),
-                          _section(
-                            'Description',
-                            RichTextEditor(
-                              controller: _description,
-                              // The same size as the section labels.
-                              fontSize: _descriptionFontSize,
-                              hintText: 'Add more detail…',
-                            ),
+                          // No label: the placeholder says what it's for.
+                          RichTextEditor(
+                            controller: _description,
+                            // The same size as the section labels.
+                            fontSize: _descriptionFontSize,
+                            hintText: 'Add description',
                           ),
                           _section('Subtasks', _subtaskEditor()),
                           _section(

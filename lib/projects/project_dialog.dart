@@ -8,6 +8,7 @@ import 'project.dart';
 import 'project_logo.dart';
 import '../app_theme.dart';
 import '../tasks/form_buttons.dart';
+import '../widgets/selected_text.dart';
 
 /// What the project dialog returns: the name, color and logo (null for
 /// none), or [delete].
@@ -52,7 +53,7 @@ class _ProjectDialog extends StatefulWidget {
 }
 
 class _ProjectDialogState extends State<_ProjectDialog> {
-  late final _name = TextEditingController(text: widget.project?.name)
+  late final _name = AppTextController(text: widget.project?.name)
     ..addListener(() => setState(() {}));
   late int _color = widget.project?.colorIndex ?? widget.defaultColorIndex;
   late ProjectLogo? _logo = widget.project?.logo;

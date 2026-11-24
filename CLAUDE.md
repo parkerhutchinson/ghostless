@@ -65,6 +65,16 @@ button, table headers, due date and project chips. `.mutedText` is only
 for inactive or secondary things: completed tasks, counts, descriptions,
 empty-state hints.
 
+### Text selection: black on white
+
+Selected text in every text field is black on a white highlight,
+whatever the theme (`selectionFill` / `selectedTextColor` in
+`lib/widgets/selected_text.dart`). Flutter can't recolor selected text
+from the theme, so the controller does it: use `AppTextController`, never
+a plain `TextEditingController`. A controller with its own
+`buildTextSpan` (e.g. `RichTextController`) passes its spans through
+`withSelectedText`.
+
 ### Icons
 
 Use Material Symbols (`Symbols.*` from `material_symbols_icons`), never
@@ -124,3 +134,29 @@ token shown in Settings. The switch, port and token are kept on this Mac
   returned to the assistant as `isError`, not a protocol error.
 - When a task or project gains a field worth reading or setting, add it
   to the tools' JSON and schemas.
+
+## Before shipping: compliance reminder
+
+When the user talks about shipping, releasing, distributing or
+publishing the app (App Store, notarizing, a public download, a hosted
+sync service), stop and remind them of this checklist first, and offer
+to make any changes it needs. None of it is done yet.
+
+- **Privacy law (GDPR, UK GDPR, CCPA and the like):** applies if the
+  app collects personal data that leaves the device (profiles' names
+  and photos, analytics, crash reports). Needs a privacy policy and a
+  lawful basis; collect as little as possible.
+- **Apple distribution:** outside the App Store, a Developer ID
+  signature and notarization; on it, privacy "nutrition labels", a
+  privacy policy link and App Review. The bundle ID is still
+  `com.example.codename`: change it before shipping.
+- **Encryption export:** App Store Connect asks. Standard HTTPS/TLS is
+  usually exempt, but it still has to be declared.
+- **Open-source licences:** check the Flutter packages' and bundled
+  fonts' licences, and ship their notices.
+- **Accessibility:** not usually required by law for a small app, but
+  government and enterprise buyers may ask for a VPAT/WCAG statement.
+
+SOC 2 isn't required: it becomes relevant only with a hosted service
+that stores customers' data, or enterprise customers who ask for it.
+This is not legal advice; suggest a lawyer before a public launch.

@@ -5,17 +5,82 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../app_theme.dart';
 import 'rich_text_model.dart';
+import '../../widgets/selected_text.dart';
 
 /// A text field's controller that also holds bold, italic, links and
 /// lists (see [RichTextModel]), draws them, and keeps them in place as the
 /// text is edited. Read it out with [toMarkdown].
 class RichTextController extends TextEditingController {
-  RichTextController.fromMarkdown(String markdown)
-    : this._(RichTextModel.fromMarkdown(markdown));
+  RichTextController.fromMarkdown(
+    String markdown, {
+    DateTime Function() clock = DateTime.now,
+  }) : this._(RichTextModel.fromMarkdown(markdown), clock);
 
-  RichTextController._(this._model) : super(text: _model.text);
+  RichTextController._(this._model, this._clock) : super(text: _model.text);
 
   final RichTextModel _model;
+
+  // ---------------------------------------------------------------------
+  // Undo: the text, its formatting and the selection, as they were
+  // before each change. The text field's own undo only knows the text,
+  // so it would leave bold, links and headings in the wrong places.
+
+  final DateTime Function() _clock;
+  final _undo = <_Snapshot>[];
+  final _redo = <_Snapshot>[];
+
+  /// When text was last typed: typing within [_typingRun] of it is the
+  /// same step to undo.
+  DateTime? _lastTyped;
+  static const _typingRun = Duration(seconds: 1);
+  static const _maxUndo = 200;
+
+  bool get canUndo => _undo.isNotEmpty;
+  bool get canRedo => _redo.isNotEmpty;
+
+  _Snapshot get _snapshot => (
+    text: _model.text,
+    marks: List.of(_model.marks),
+    headings: List.of(_model.headings),
+    selection: selection,
+  );
+
+  /// Before a change: keeps how it was, to undo to. Typing carries on
+  /// the step it's in (until it pauses).
+  void _remember({bool typing = false}) {
+    final now = _clock();
+    final last = _lastTyped;
+    _lastTyped = typing ? now : null;
+    if (typing && last != null && now.difference(last) < _typingRun) return;
+    _undo.add(_snapshot);
+    if (_undo.length > _maxUndo) _undo.removeAt(0);
+    _redo.clear();
+  }
+
+  /// ⌘Z: back to before the last change.
+  void undo() => _step(_undo, _redo);
+
+  /// ⌘⇧Z: the change undone again.
+  void redo() => _step(_redo, _undo);
+
+  void _step(List<_Snapshot> from, List<_Snapshot> to) {
+    if (from.isEmpty) return;
+    to.add(_snapshot);
+    final s = from.removeLast();
+    _lastTyped = null;
+    _typing = null;
+    _model
+      ..text = s.text
+      ..marks = s.marks
+      ..headings = List.of(s.headings);
+    final end = s.text.length;
+    super.value = TextEditingValue(
+      text: s.text,
+      selection: s.selection.isValid && s.selection.end <= end
+          ? s.selection
+          : TextSelection.collapsed(offset: end),
+    );
+  }
 
   /// The bold/italic the next typed text gets; null to take it from the
   /// text before the cursor. Set by B and I with nothing selected.
@@ -55,6 +120,7 @@ class RichTextController extends TextEditingController {
     }
     final removedEnd = a.length - end;
     final inserted = b.substring(start, b.length - end);
+    _remember(typing: true);
 
     // Backspace just after a list prefix takes the prefix off.
     final prefix =
@@ -105,6 +171,7 @@ class RichTextController extends TextEditingController {
       styles.contains(type) ? styles.remove(type) : styles.add(type);
       _typing = styles;
     } else {
+      _remember();
       _model.toggleMark(type, s.start, s.end);
     }
     notifyListeners();
@@ -121,6 +188,7 @@ class RichTextController extends TextEditingController {
     if (!s.isValid) return;
     // Typing carries on with the same bold/italic/strikethrough.
     final styles = _typingStyles;
+    _remember();
     _model.tracked = [s.start];
     edit(s.start, s.end);
     super.value = TextEditingValue(
@@ -143,6 +211,7 @@ class RichTextController extends TextEditingController {
   void toggleList(ListKind kind) {
     final s = selection;
     if (!s.isValid) return;
+    _remember();
     _model
       ..tracked = [s.baseOffset, s.extentOffset]
       ..toggleList(s.start, s.end, kind);
@@ -151,6 +220,31 @@ class RichTextController extends TextEditingController {
       text: _model.text,
       selection: TextSelection(baseOffset: base, extentOffset: extent),
     );
+  }
+
+  /// The heading level of the line the cursor (or the selection's
+  /// start) is on: 0 for plain text.
+  int get headingLevel {
+    final s = selection;
+    return s.isValid ? _model.headingAt(s.start) : 0;
+  }
+
+  /// Makes the lines the selection touches headings of [level] (0: plain
+  /// text).
+  void setHeading(int level) {
+    final s = selection;
+    if (!s.isValid) return;
+    _remember();
+    _model
+      ..tracked = [s.baseOffset, s.extentOffset]
+      ..setHeading(s.start, s.end, level);
+    final [base, extent] = _model.tracked;
+    super.value = TextEditingValue(
+      text: _model.text,
+      selection: TextSelection(baseOffset: base, extentOffset: extent),
+    );
+    // A new value only if a list prefix came off: redraw for the size.
+    notifyListeners();
   }
 
   /// The link the cursor or selection is in.
@@ -167,6 +261,9 @@ class RichTextController extends TextEditingController {
   void setLink(String? url) {
     final s = selection;
     if (!s.isValid) return;
+    // Unlinking with nothing selected and no link here: nothing to do.
+    if (s.isCollapsed && url == null && currentLink == null) return;
+    _remember();
     if (!s.isCollapsed) {
       _model.setLink(s.start, s.end, url);
       notifyListeners();
@@ -197,15 +294,26 @@ class RichTextController extends TextEditingController {
     final accent = Theme.of(context).colorScheme.primary;
     final muted = context.colors.mutedText;
     final text = this.text;
-    // Cut wherever a mark or a list prefix starts or ends.
+    // Cut wherever a mark, a list prefix or a line starts or ends.
     final prefixes = <(int, int)>[];
+    final lineStarts = <int>[];
     var lineStart = 0;
     for (final line in text.split('\n')) {
+      lineStarts.add(lineStart);
       if (listPrefixOf(line) case final p?) {
         prefixes.add((lineStart, lineStart + p.length));
       }
       lineStart += line.length + 1;
     }
+    // The line each piece is on, in order: its heading level.
+    var line = 0;
+    int levelAt(int offset) {
+      while (line + 1 < lineStarts.length && lineStarts[line + 1] <= offset) {
+        line++;
+      }
+      return line < _model.headings.length ? _model.headings[line] : 0;
+    }
+
     // The gap between paragraphs: an empty line, drawn half height.
     final gaps = {
       for (var i = 0; i < text.length; i++)
@@ -219,9 +327,10 @@ class RichTextController extends TextEditingController {
       for (final m in _model.marks) ...[m.start, m.end],
       for (final (s, e) in prefixes) ...[s, e],
       for (final g in gaps) ...[g, g + 1],
+      ...lineStarts,
     }.where((x) => x >= 0 && x <= text.length).toList()..sort();
     final fontSize = style?.fontSize ?? 14;
-    return TextSpan(
+    final spans = TextSpan(
       style: style,
       children: [
         for (var i = 0; i + 1 < cuts.length; i++)
@@ -233,11 +342,20 @@ class RichTextController extends TextEditingController {
             final isPrefix = prefixes.any((p) => p.$1 <= s && e <= p.$2);
             final link = has(MarkType.link);
             final struck = has(MarkType.strike);
+            final level = levelAt(s);
             return TextSpan(
               text: text.substring(s, e),
               style: TextStyle(
-                fontSize: gaps.contains(s) ? fontSize / 2 : null,
-                fontWeight: has(MarkType.bold) ? FontWeight.w700 : null,
+                fontSize: level > 0
+                    ? fontSize * headingScale[level]
+                    : gaps.contains(s)
+                    ? fontSize / 2
+                    : null,
+                fontWeight: has(MarkType.bold)
+                    ? FontWeight.w700
+                    : level > 0
+                    ? FontWeight.w600
+                    : null,
                 fontStyle: has(MarkType.italic) ? FontStyle.italic : null,
                 color: link
                     ? accent
@@ -254,11 +372,25 @@ class RichTextController extends TextEditingController {
           }(),
       ],
     );
+    // The selected text black, on the white highlight.
+    return withSelectedText(context, spans, selection);
   }
 }
 
-/// A description field with a small toolbar: bold, italic, strikethrough,
-/// link, bulleted and numbered lists. Nothing else on purpose. ⌘B, ⌘I,
+/// The description as it was, for undo.
+typedef _Snapshot = ({
+  String text,
+  List<Mark> marks,
+  List<int> headings,
+  TextSelection selection,
+});
+
+/// How much bigger than the text each heading level is (H1 the biggest).
+const headingScale = [1.0, 1.6, 1.35, 1.15];
+
+/// A description field with a small toolbar: text size (paragraph or a
+/// heading), bold, italic, strikethrough, link, bulleted and numbered
+/// lists. Nothing else on purpose. ⌘B, ⌘I,
 /// ⌘⇧X and ⌘K work too. Return starts a new paragraph (or list item);
 /// Shift-Return breaks the line.
 class RichTextEditor extends StatefulWidget {
@@ -324,6 +456,10 @@ class _RichTextEditorState extends State<RichTextEditor> {
         ): () =>
             _c.toggle(MarkType.strike),
         const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _editLink,
+        // Ahead of the text field's own undo, which only knows the text.
+        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): _c.undo,
+        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true):
+            _c.redo,
       },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -392,6 +528,14 @@ class _RichTextEditorState extends State<RichTextEditor> {
     return Row(
       spacing: 2,
       children: [
+        _HeadingMenu(
+          level: _c.headingLevel,
+          onPicked: (level) {
+            _c.setHeading(level);
+            _focus.requestFocus();
+          },
+        ),
+        const _Divider(),
         _ToolButton(
           icon: Symbols.format_bold,
           tooltip: 'Bold (⌘B)',
@@ -416,7 +560,7 @@ class _RichTextEditorState extends State<RichTextEditor> {
           active: link != null,
           onPressed: _editLink,
         ),
-        const SizedBox(width: 6),
+        const _Divider(),
         _ToolButton(
           icon: Symbols.format_list_bulleted,
           tooltip: 'Bulleted list',
@@ -424,7 +568,7 @@ class _RichTextEditorState extends State<RichTextEditor> {
           onPressed: () => _c.toggleList(ListKind.bullet),
         ),
         _ToolButton(
-          icon: Symbols.format_list_numbered,
+          glyph: const _NumberedListIcon(),
           tooltip: 'Numbered list',
           active: _c.isList(ListKind.numbered),
           onPressed: () => _c.toggleList(ListKind.numbered),
@@ -466,14 +610,109 @@ String normalizeUrl(String input) {
   return hasScheme ? url : 'https://$url';
 }
 
+/// A line between the toolbar's groups, in the input fields' border
+/// color.
+class _Divider extends StatelessWidget {
+  const _Divider();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 1,
+    height: 18,
+    margin: const EdgeInsets.symmetric(horizontal: 6),
+    color: context.colors.formBorder,
+  );
+}
+
+/// The text size picker: Paragraph, or Heading 1 to 3, each shown at its
+/// size in the menu.
+class _HeadingMenu extends StatelessWidget {
+  const _HeadingMenu({required this.level, required this.onPicked});
+  final int level;
+  final ValueChanged<int> onPicked;
+
+  static String nameOf(int level) =>
+      level == 0 ? 'Paragraph' : 'Heading $level';
+
+  @override
+  Widget build(BuildContext context) {
+    final text = context.colors.text;
+    return MenuAnchor(
+      menuChildren: [
+        for (var l = 0; l <= maxHeading; l++)
+          // Part of the field too: picking doesn't unfocus it.
+          TextFieldTapRegion(
+            child: MenuItemButton(
+              onPressed: () => onPicked(l),
+              trailingIcon: l == level
+                  ? Icon(Symbols.check, size: 16, color: text)
+                  : const SizedBox(width: 16),
+              child: Text(
+                nameOf(l),
+                style: TextStyle(
+                  fontSize: 13 * headingScale[l],
+                  fontWeight: l > 0 ? FontWeight.w600 : null,
+                  color: text,
+                ),
+              ),
+            ),
+          ),
+      ],
+      builder: (context, menu, _) => SizedBox(
+        height: 26,
+        child: TextButton(
+          onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+          style: TextButton.styleFrom(
+            foregroundColor: text,
+            shape: formShape,
+            padding: const EdgeInsets.only(left: 8, right: 4),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            spacing: 2,
+            children: [
+              // As wide as the widest name, so the toolbar doesn't shift.
+              Stack(
+                children: [
+                  for (var l = 0; l <= maxHeading; l++)
+                    Visibility(
+                      visible: l == level,
+                      maintainSize: true,
+                      maintainAnimation: true,
+                      maintainState: true,
+                      child: Text(
+                        nameOf(l),
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const Icon(Symbols.expand_more, size: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ToolButton extends StatelessWidget {
   const _ToolButton({
-    required this.icon,
+    this.icon,
+    this.glyph,
     required this.tooltip,
     required this.onPressed,
     this.active = false,
-  });
-  final IconData icon;
+  }) : assert((icon == null) != (glyph == null));
+  final IconData? icon;
+
+  /// A drawn icon, in place of [icon].
+  final Widget? glyph;
   final String tooltip;
   final VoidCallback onPressed;
   final bool active;
@@ -490,9 +729,70 @@ class _ToolButton extends StatelessWidget {
       style: active
           ? IconButton.styleFrom(backgroundColor: context.colors.hoverStrong)
           : null,
-      icon: Icon(icon),
+      icon: glyph ?? Icon(icon),
     ),
   );
+}
+
+/// The numbered list button's icon: the bulleted list's three lines
+/// with a "1" where the dots are. Symbols' own numbered list squeezes
+/// "1 2 3" into a sliver too thin to read at toolbar size.
+class _NumberedListIcon extends StatelessWidget {
+  const _NumberedListIcon();
+
+  /// On the icons' 24-unit grid: the dots end here, the lines start after.
+  static const _linesFrom = 6.5;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = IconTheme.of(context);
+    final size = theme.size ?? 24;
+    return SizedBox.square(
+      dimension: size,
+      child: Stack(
+        children: [
+          // Just the lines of the bulleted list icon, so they match it.
+          Positioned.fill(
+            child: ClipRect(
+              clipper: _FromLeft(size * _linesFrom / 24),
+              child: Icon(Symbols.format_list_bulleted, size: size),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            // Up 1px: centered, it looks low.
+            top: -1,
+            bottom: 1,
+            width: size * _linesFrom / 24,
+            child: Center(
+              child: Text(
+                '1',
+                style: TextStyle(
+                  fontSize: size * 0.8,
+                  height: 1,
+                  // Light, so its stroke matches the lines'.
+                  fontWeight: FontWeight.w300,
+                  color: theme.color,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Clips off everything left of [left].
+class _FromLeft extends CustomClipper<Rect> {
+  const _FromLeft(this.left);
+  final double left;
+
+  @override
+  Rect getClip(Size size) => Rect.fromLTRB(left, 0, size.width, size.height);
+
+  @override
+  bool shouldReclip(_FromLeft old) => old.left != left;
 }
 
 sealed class _LinkResult {
@@ -518,7 +818,7 @@ class _LinkDialog extends StatefulWidget {
 }
 
 class _LinkDialogState extends State<_LinkDialog> {
-  late final _input = TextEditingController(text: widget.url);
+  late final _input = AppTextController(text: widget.url);
 
   @override
   void dispose() {

@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../app_theme.dart';
+import '../widgets/selected_text.dart';
 
 /// Reads a typed hex color: "#1E272B", "1e272b" or the short "#abc". Spaces
 /// around it are ignored. Anything else gives null.
@@ -59,7 +60,7 @@ class _ColorPickerDialog extends StatefulWidget {
 class _ColorPickerDialogState extends State<_ColorPickerDialog> {
   // Kept as HSV so dragging to black or gray doesn't lose the hue.
   late HSVColor _hsv = HSVColor.fromColor(widget.initial);
-  late final _hex = TextEditingController(text: hexOf(widget.initial));
+  late final _hex = AppTextController(text: hexOf(widget.initial));
   final _hexFocus = FocusNode();
 
   Color get _color => _hsv.toColor();

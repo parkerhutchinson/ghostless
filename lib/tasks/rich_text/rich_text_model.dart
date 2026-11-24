@@ -1,15 +1,16 @@
 /// The task description's formatting: bold, italic, strikethrough, links,
-/// bulleted and numbered lists, and paragraphs (a blank line between).
-/// Nothing else (no headings, images, quotes…).
+/// bulleted and numbered lists, headings (three sizes) and paragraphs (a
+/// blank line between). Nothing else (no images, quotes…).
 ///
 /// The text is plain, with list items marked by a prefix at the start of
 /// their line ("• " or "1. "), so lists edit like the text they look like.
-/// Bold, italic and links are [Mark]s: ranges over the text.
+/// Bold, italic and links are [Mark]s: ranges over the text. Headings are
+/// a level per line ([RichTextModel.headings]).
 ///
 /// Saved as a small Markdown subset (see [RichTextModel.toMarkdown]):
 /// `**bold**`, `*italic*`, `~~struck~~`, `[text](url)`, `- item`,
-/// `1. item`, and a blank line between paragraphs. A plain
-/// description from before is read as is.
+/// `1. item`, `# heading` (to `###`), and a blank line between
+/// paragraphs. A plain description from before is read as is.
 library;
 
 enum MarkType { bold, italic, strike, link }
@@ -46,6 +47,10 @@ enum ListKind { bullet, numbered }
 const bulletPrefix = '• ';
 final _numberedPrefix = RegExp(r'^(\d+)\. ');
 
+/// The largest heading: H1 to H3, nothing larger.
+const maxHeading = 3;
+final _headingPrefix = RegExp(r'^(#{1,3}) ');
+
 /// The list prefix a line starts with, if it's a list item.
 ({ListKind kind, int length})? listPrefixOf(String line) {
   if (line.startsWith(bulletPrefix)) {
@@ -63,11 +68,22 @@ const textStyles = {MarkType.bold, MarkType.italic, MarkType.strike};
 /// The editable state: [text] and its [marks]. Edits keep the marks in
 /// place, and move any offsets in [tracked] (the selection) along.
 class RichTextModel {
-  RichTextModel([this.text = '', List<Mark> marks = const []])
-    : marks = _normalize(marks, text.length);
+  RichTextModel([
+    this.text = '',
+    List<Mark> marks = const [],
+    List<int>? headings,
+  ]) : marks = _normalize(marks, text.length),
+       headings = [
+         for (var i = 0; i <= '\n'.allMatches(text).length; i++)
+           headings != null && i < headings.length ? headings[i] : 0,
+       ];
 
   String text;
   List<Mark> marks;
+
+  /// Each line's heading level: 1 to [maxHeading], or 0 for plain text.
+  /// One per line, kept in step as lines come and go.
+  List<int> headings;
 
   /// Offsets moved along by every edit, like a cursor would be.
   List<int> tracked = [];
@@ -96,6 +112,7 @@ class RichTextModel {
         : x >= end
         ? x + delta
         : start;
+    _shiftHeadings(start, end, inserted);
     text = text.replaceRange(start, end, inserted);
     var next = [
       for (final m in marks) m.withRange(markStart(m.start), markEnd(m.end)),
@@ -114,6 +131,31 @@ class RichTextModel {
             : x >= end
             ? x + delta
             : insEnd,
+    ];
+  }
+
+  /// Before `[start, end)` is replaced with [inserted]: [headings] for
+  /// the lines after. Lines joined keep the first one's level (or, when
+  /// whole lines are taken out, the next one's); lines split off are
+  /// plain, the line's level staying with its text.
+  void _shiftHeadings(int start, int end, String inserted) {
+    int breaks(String s) => '\n'.allMatches(s).length;
+    final line = breaks(text.substring(0, start));
+    final removed = breaks(text.substring(start, end));
+    final added = breaks(inserted);
+    if (removed == 0 && added == 0) return;
+    final atLineStart = start == _lineStart(start);
+    final wholeLines =
+        atLineStart && removed > 0 && (end == 0 || text[end - 1] == '\n');
+    final level = headings[wholeLines ? line + removed : line];
+    // Split at the start of the line: the text (and its level) moves down.
+    final textLast = atLineStart && end == start;
+    headings = [
+      ...headings.sublist(0, line),
+      if (textLast) ...List.filled(added, 0),
+      level,
+      if (!textLast) ...List.filled(added, 0),
+      ...headings.sublist(line + removed + 1),
     ];
   }
 
@@ -188,16 +230,52 @@ class RichTextModel {
 
   String _lineAt(int start) => text.substring(start, _lineEnd(start));
 
-  /// Makes the lines `[start, end)` touches into a [kind] list, or plain
-  /// lines if they all are one already.
-  void toggleList(int start, int end, ListKind kind) {
+  /// The start offsets of the lines `[start, end)` touches. A selection
+  /// ending at the very start of a line doesn't take it in.
+  List<int> _linesIn(int start, int end) {
     final first = _lineStart(start);
-    // A selection ending at the very start of a line doesn't take it in.
-    final lines = [
+    return [
       for (final s in lineStarts)
         if (s == first || (s > first && s < end)) s,
     ];
+  }
+
+  int _lineIndex(int offset) =>
+      '\n'.allMatches(text.substring(0, _lineStart(offset))).length;
+
+  /// The heading level of the line [offset] is in (0: plain text).
+  int headingAt(int offset) => headings[_lineIndex(offset)];
+
+  /// Makes the lines `[start, end)` touches headings of [level] (0: plain
+  /// text). A heading isn't a list item too: their prefixes come off.
+  void setHeading(int start, int end, int level) {
+    assert(0 <= level && level <= maxHeading);
+    final lines = _linesIn(start, end);
+    final first = _lineIndex(start);
+    for (var i = first; i < first + lines.length; i++) {
+      headings[i] = level;
+    }
+    if (level == 0) return;
+    // From the last line up, so earlier offsets stay valid.
+    for (final s in lines.reversed) {
+      if (listPrefixOf(_lineAt(s)) case final p?) {
+        replace(s, s + p.length, '');
+      }
+    }
+    renumber();
+  }
+
+  /// Makes the lines `[start, end)` touches into a [kind] list, or plain
+  /// lines if they all are one already. A list item isn't a heading.
+  void toggleList(int start, int end, ListKind kind) {
+    final lines = _linesIn(start, end);
     final all = lines.every((s) => listPrefixOf(_lineAt(s))?.kind == kind);
+    if (!all) {
+      final first = _lineIndex(start);
+      for (var i = first; i < first + lines.length; i++) {
+        headings[i] = 0;
+      }
+    }
     // From the last line up, so earlier offsets stay valid.
     for (final s in lines.reversed) {
       final prefix = listPrefixOf(_lineAt(s));
@@ -310,16 +388,19 @@ class RichTextModel {
       final e = _lineEnd(s);
       final line = text.substring(s, e);
       final prefix = listPrefixOf(line);
-      if (prefix?.kind == ListKind.bullet) {
+      final level = headings[i];
+      if (level > 0) {
+        out.write('${'#' * level} ');
+      } else if (prefix?.kind == ListKind.bullet) {
         out.write('- ');
       } else if (prefix != null) {
         out.write(line.substring(0, prefix.length));
       }
-      final from = s + (prefix?.length ?? 0);
+      final from = s + (level > 0 ? 0 : prefix?.length ?? 0);
       var inline = _inlineMarkdown(from, e);
-      // A plain line that would read back as a list item.
-      if (prefix == null) {
-        if (inline.startsWith('- ')) {
+      // A plain line that would read back as a list item or a heading.
+      if (level == 0 && prefix == null) {
+        if (inline.startsWith('- ') || _headingPrefix.hasMatch(inline)) {
           inline = '\\$inline';
         } else if (_numberedPrefix.firstMatch(inline) case final m?) {
           inline = '${m.group(1)}\\${inline.substring(m.group(1)!.length)}';
@@ -393,10 +474,15 @@ class RichTextModel {
   factory RichTextModel.fromMarkdown(String markdown) {
     final text = StringBuffer();
     final marks = <Mark>[];
+    final headings = <int>[];
     for (final (i, line) in markdown.split('\n').indexed) {
       if (i > 0) text.write('\n');
       var rest = line;
-      if (rest.startsWith('- ')) {
+      final heading = _headingPrefix.firstMatch(rest);
+      headings.add(heading?.group(1)!.length ?? 0);
+      if (heading != null) {
+        rest = rest.substring(heading.end);
+      } else if (rest.startsWith('- ')) {
         text.write(bulletPrefix);
         rest = rest.substring(2);
       } else if (_numberedPrefix.firstMatch(rest) case final m?) {
@@ -405,7 +491,7 @@ class RichTextModel {
       }
       _parseInline(rest, text, marks);
     }
-    return RichTextModel(text.toString(), marks);
+    return RichTextModel(text.toString(), marks, headings);
   }
 
   static final _link = RegExp(r'\]\(([^)\s]*)\)');

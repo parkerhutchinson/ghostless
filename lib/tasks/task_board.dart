@@ -9,6 +9,7 @@ import 'task_repository.dart';
 import 'tasks_page.dart' show TaskCardBuilder;
 import '../widgets/bottom_fade.dart';
 import '../widgets/left_menu_button.dart';
+import '../widgets/selected_text.dart';
 
 const _columnWidth = 350.0;
 const _columnGap = 16.0;
@@ -416,7 +417,7 @@ class _ColumnHeaderState extends State<ColumnHeader> {
   );
 
   bool _editing = false;
-  late final _name = TextEditingController();
+  late final _name = AppTextController();
   final _focus = FocusNode();
 
   @override

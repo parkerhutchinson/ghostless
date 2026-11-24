@@ -237,7 +237,7 @@ final class McpTools {
         {
           'project': _project,
           'title': _string('The task\'s title.'),
-          'description': _string('Details, in Markdown.'),
+          'description': _string('Details, in Markdown ($_markdownSubset).'),
           'column': _string('The column to put it in (its id or name).'),
           'assignee': _string('Who it\'s for (a person\'s id or name).'),
           'dueDate': _string('Due day, YYYY-MM-DD.'),
@@ -295,7 +295,9 @@ final class McpTools {
         {
           'taskId': _taskId,
           'title': _string('New title.'),
-          'description': _string('New description, in Markdown.'),
+          'description': _string(
+            'New description, in Markdown ($_markdownSubset).',
+          ),
           'assignee': {
             'type': ['string', 'null'],
             'description': 'A person\'s id or name; null to unassign.',
@@ -808,3 +810,9 @@ Map<String, Object?> _strings(String description) => {
 
 final _project = _string('The project (its id or name).');
 final _taskId = _string('The task\'s id.');
+
+/// The Markdown a task description can show (the description editor's).
+const _markdownSubset =
+    '**bold**, *italic*, ~~struck~~, [text](url), "- " and "1. " list '
+    'items, "# " to "### " headings, a blank line between paragraphs; '
+    'nothing else';

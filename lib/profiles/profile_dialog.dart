@@ -6,6 +6,7 @@ import '../app_theme.dart';
 import 'profile.dart';
 import 'profile_avatar.dart';
 import 'profile_repository.dart';
+import '../widgets/selected_text.dart';
 
 /// The Profile modal, opened from the avatar at the bottom of the sidebar:
 /// the current profile's photo and name, and the other profiles on this
@@ -30,10 +31,10 @@ class _ProfileDialog extends StatefulWidget {
 class _ProfileDialogState extends State<_ProfileDialog> {
   ProfileRepository get _repo => widget.profiles;
   late final Profile _profile = _repo.current!;
-  late final _name = TextEditingController(text: _profile.name);
-  late final _department = TextEditingController(text: _profile.department);
-  late final _jobTitle = TextEditingController(text: _profile.jobTitle);
-  late final _description = TextEditingController(text: _profile.description);
+  late final _name = AppTextController(text: _profile.name);
+  late final _department = AppTextController(text: _profile.department);
+  late final _jobTitle = AppTextController(text: _profile.jobTitle);
+  late final _description = AppTextController(text: _profile.description);
 
   @override
   void dispose() {
@@ -231,7 +232,7 @@ class _NewProfileDialog extends StatefulWidget {
 }
 
 class _NewProfileDialogState extends State<_NewProfileDialog> {
-  final _name = TextEditingController();
+  final _name = AppTextController();
 
   @override
   void dispose() {

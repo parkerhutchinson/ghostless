@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import 'layout.dart';
+import 'widgets/selected_text.dart';
 
 /// Corner radius of every button, chip and input in the app: the task
 /// form's style. No pill-shaped buttons anywhere.
@@ -225,8 +226,10 @@ ThemeData buildAppTheme({
           outline: colors.formBorder,
           outlineVariant: colors.cardBorder,
         ),
+    // Selected text is black on white, whatever the theme: the fields'
+    // controllers (AppTextController) draw the text black.
     textSelectionTheme: TextSelectionThemeData(
-      selectionColor: accent,
+      selectionColor: selectionFill,
       cursorColor: colors.text,
       selectionHandleColor: accent,
     ),
