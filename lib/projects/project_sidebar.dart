@@ -276,6 +276,9 @@ class _SidebarItemState extends State<_SidebarItem> {
             child: InkWell(
               onTap: widget.onTap,
               borderRadius: formRadius,
+              // No ripple or press shade: the selected fill shows the click.
+              splashFactory: NoSplash.splashFactory,
+              highlightColor: Colors.transparent,
               child: SizedBox(
                 height: 34,
                 child: Padding(

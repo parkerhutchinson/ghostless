@@ -31,9 +31,18 @@ class SettingsRepository {
 
   /// The image over the background color; null for none. Until one is
   /// picked (or "No image"), it's the image that ships with the app.
-  Background? get background => switch (_settings) {
-    final s when !s.containsKey('background') => const DefaultBackground(),
-    final s => Background.fromJson(s['background'] as Map<String, Object?>?),
+  Background? get background =>
+      Background.fromJson(_settings['background'] as Map<String, Object?>?);
+
+  /// The image the user last uploaded (its file name), kept while another
+  /// choice (No image) is showing so it can be picked again; null if none.
+  /// Older settings only had it as the background.
+  String? get uploadedImage => switch (_settings['backgroundUpload']) {
+    final String name when name.isNotEmpty => name,
+    _ => switch (background) {
+      ImageBackground(:final fileName) => fileName,
+      null => null,
+    },
   };
 
   /// The background image, now and whenever it changes.
@@ -41,17 +50,9 @@ class SettingsRepository {
       _changes.map((_) => background).distinct();
 
   /// Switches the background image (null for none), leaving the colors
-  /// alone. A previously picked image that's no longer used is deleted.
-  void setBackground(Background? value) {
-    final previous = background;
-    _writeBackground({'background': value?.toJson()});
-    // Unless another profile still has it as their background.
-    if (previous is ImageBackground &&
-        previous != value &&
-        !_imagesInUse().contains(previous.fileName)) {
-      _deleteFile(previous.fileName);
-    }
-  }
+  /// alone. The uploaded image is kept either way ([uploadedImage]).
+  void setBackground(Background? value) =>
+      _writeBackground({'background': value?.toJson()});
 
   /// The background color: what the app's surfaces, borders and text are
   /// worked out from (see AppColors), with or without an image over it.
@@ -72,6 +73,7 @@ class SettingsRepository {
     ..._settings,
     'backgroundColor': backgroundColor.toARGB32(),
     'background': background?.toJson(),
+    'backgroundUpload': uploadedImage,
     ...changes,
   });
 
@@ -84,15 +86,23 @@ class SettingsRepository {
     }
   }
 
-  /// Copies a picked image into the app and makes it the background.
+  /// Copies a picked image into the app and makes it the background (and
+  /// the [uploadedImage]). The one uploaded before is deleted, unless
+  /// another profile uses it.
   Future<ImageBackground> setBackgroundImage(String sourcePath) async {
     await backgroundsDir.create(recursive: true);
     final dot = sourcePath.lastIndexOf('.');
     final ext = dot == -1 ? '' : sourcePath.substring(dot).toLowerCase();
     final name = '${newId()}$ext';
     await File(sourcePath).copy(backgroundFile(name).path);
+    final previous = uploadedImage;
     final value = ImageBackground(name);
-    setBackground(value);
+    _writeBackground({'background': value.toJson(), 'backgroundUpload': name});
+    if (previous != null &&
+        previous != name &&
+        !_imagesInUse().contains(previous)) {
+      _deleteFile(previous);
+    }
     return value;
   }
 
@@ -127,17 +137,20 @@ class SettingsRepository {
     null => _store.watch(_collection),
   };
 
-  /// Background image files some profile (or this Mac's settings) uses.
+  /// Background image files some profile (or this Mac's settings) uses:
+  /// as its background, or kept as its uploaded image.
   Set<String> _imagesInUse() => {
     for (final theme in [
       if (_profiles case final profiles?)
         for (final p in profiles.all()) p.theme
       else
         _settings,
-    ])
+    ]) ...[
       if (Background.fromJson(theme['background'] as Map<String, Object?>?)
           case ImageBackground(:final fileName))
         fileName,
+      if (theme['backgroundUpload'] case final String name) name,
+    ],
   };
 
   void _deleteFile(String name) {

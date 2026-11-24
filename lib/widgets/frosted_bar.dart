@@ -19,32 +19,57 @@ const _headerInset = titleBarHeight + 2;
 /// wash of the background color) across the pane's full width, from the
 /// top of the window, so the title reads over any background image.
 /// [child] sits below the title bar strip (which drags the window),
-/// centered in the rest; a little space separates it from the page below.
-/// With no background image there's nothing to frost: it's just the
-/// header on the background color. Either way, a line along its bottom.
+/// centered in the rest. No hard edge: the glass fades out below it, over
+/// the gap above the page. With no background image there's nothing to
+/// frost: it's the header on the background color, with a line along its
+/// bottom.
 class FrostedBar extends StatelessWidget {
   const FrostedBar({super.key, required this.child});
   final Widget child;
 
+  /// The gap below the header's row, above the page.
+  static const _gap = 32.0;
+
+  /// How far up the glass fades out: all of it, from the top of the
+  /// window down through the gap, so it's soft.
+  static const _fade = _headerInset + pageHeaderHeight + _headerInset + _gap;
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 32),
-      child: _Glass(
-        child: Padding(
-          // As much space below as above, so it sits centered in the
-          // glass (just below the title bar strip, which drags the window).
-          padding: const EdgeInsets.fromLTRB(
-            24,
-            _headerInset,
-            24,
-            _headerInset,
-          ),
-          child: SizedBox(
-            height: pageHeaderHeight,
-            child: Align(alignment: Alignment.centerLeft, child: child),
+    final row = SizedBox(
+      height: pageHeaderHeight,
+      child: Align(alignment: Alignment.centerLeft, child: child),
+    );
+    // As much space below the row as above, so it sits centered (just
+    // below the title bar strip, which drags the window).
+    if (BackgroundImageScope.of(context) == null) {
+      // Nothing to frost: the line along the bottom, then the gap.
+      return Padding(
+        padding: const EdgeInsets.only(bottom: _gap),
+        child: _Glass(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              24,
+              _headerInset,
+              24,
+              _headerInset,
+            ),
+            child: row,
           ),
         ),
+      );
+    }
+    // Frosted: the glass runs through the gap, fading out.
+    return _Glass(
+      fade: _fade,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          24,
+          _headerInset,
+          24,
+          _headerInset + _gap,
+        ),
+        child: row,
       ),
     );
   }
@@ -76,21 +101,65 @@ class FrostedHeader extends StatelessWidget {
 
 /// Frosted glass over a background image: the background blurred under a
 /// wash of the background color. Either way, a line along the bottom in
-/// a tint of the background color (the usual border line).
+/// a tint of the background color (the usual border line), or with
+/// [fade], no line: the glass fades out at the bottom instead.
 ///
 /// The blur is the background image itself, blurred once (see
 /// [blurredImage]) and drawn lined up with the window's. Not a
 /// BackdropFilter: it doesn't blur on this renderer (Impeller, MetalSDF),
 /// nor inside a list's fade (a ShaderMask).
 class _Glass extends StatelessWidget {
-  const _Glass({required this.child, this.line = true});
+  const _Glass({required this.child, this.line = true, this.fade});
   final Widget child;
   final bool line;
+
+  /// Instead of the line: the glass fades out over this much at the
+  /// bottom.
+  final double? fade;
 
   @override
   Widget build(BuildContext context) {
     final image = BackgroundImageScope.of(context);
     final frosted = image != null;
+    final fade = this.fade;
+    if (fade != null) {
+      if (!frosted) return child;
+      // The blur and tint behind [child], fading to nothing at the bottom.
+      return ClipRect(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: ShaderMask(
+                blendMode: BlendMode.dstIn,
+                shaderCallback: (bounds) => LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  // Even all the way down (linear): an eased curve
+                  // bunches the change into the middle, so the fade
+                  // looks shorter than it is.
+                  colors: const [
+                    Colors.black,
+                    Colors.black,
+                    Colors.transparent,
+                  ],
+                  stops: [0, (1 - fade / bounds.height).clamp(0.0, 1.0), 1],
+                ).createShader(bounds),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _BlurredBackground(image),
+                    ColoredBox(
+                      color: context.colors.surface.withValues(alpha: 0.5),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            child,
+          ],
+        ),
+      );
+    }
     final box = DecoratedBox(
       decoration: BoxDecoration(
         // Tinted with the background color picked in Settings.

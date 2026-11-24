@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:sync_engine/sync_engine.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -7,6 +8,7 @@ import '../activity/activity_page.dart';
 import '../activity/activity_repository.dart';
 import '../export/export_section.dart';
 import '../mcp/mcp_service.dart';
+import '../search/search_dialog.dart';
 import '../sync/sync_service.dart';
 import '../tasks/task.dart';
 import '../tasks/task_repository.dart';
@@ -83,6 +85,7 @@ class _WorkspaceState extends State<Workspace> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_onKey);
     _adoptOrphans();
     // Image files of tasks deleted just before the app last quit.
     widget.tasks.deleteUnusedImages();
@@ -101,12 +104,49 @@ class _WorkspaceState extends State<Workspace> {
     }
   }
 
-  /// A task to open once its project's board shows (from Activity).
-  String? _openTaskId;
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
+    super.dispose();
+  }
 
-  /// From Activity: goes to [projectId]'s board and opens [task] there.
+  /// ⌘K anywhere opens search; not while a dialog or menu is open over the
+  /// page (search itself included).
+  bool _onKey(KeyEvent event) {
+    final keyboard = HardwareKeyboard.instance;
+    if (event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.keyK ||
+        !keyboard.isMetaPressed ||
+        keyboard.isShiftPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isControlPressed ||
+        !(ModalRoute.of(context)?.isCurrent ?? true)) {
+      return false;
+    }
+    _search();
+    return true;
+  }
+
+  /// Search: a found task opens on its board.
+  void _search() => showSearchDialog(
+    context,
+    tasks: widget.tasks,
+    projects: visibleProjects(
+      widget.projects.current(),
+      widget.profiles.current?.id,
+    ),
+    onOpen: _openTask,
+    paneLeft: sidebarWidth,
+  );
+
+  /// A task to open once its project's board shows (from Activity or
+  /// search); a new serial each time, so asking again reopens it.
+  ({String taskId, int serial})? _openRequest;
+  var _openSerial = 0;
+
+  /// Goes to [projectId]'s board and opens [task] there.
   void _openTask(Task task, String projectId) {
-    _openTaskId = task.id;
+    _openRequest = (taskId: task.id, serial: ++_openSerial);
     _select(projectId);
   }
 
@@ -327,8 +367,9 @@ class _WorkspaceState extends State<Workspace> {
                   projectId: selected.id,
                   projects: projects,
                   projectRepo: widget.projects,
-                  openTaskId: _openTaskId,
-                  onTaskOpened: () => _openTaskId = null,
+                  openRequest: _openRequest,
+                  onTaskOpened: () => _openRequest = null,
+                  onSearch: _search,
                 ),
         ),
       ],

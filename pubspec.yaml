@@ -8,6 +8,7 @@ environment:
 
 dependencies:
   archive: ^4.7.1
+  characters: ^1.4.1
   file_selector: ^1.1.0
   flutter:
     sdk: flutter
@@ -29,6 +30,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-
-  assets:
-    - assets/default-background.jpg

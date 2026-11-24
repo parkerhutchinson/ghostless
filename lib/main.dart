@@ -159,7 +159,6 @@ class MainApp extends StatelessWidget {
             ImageBackground(:final fileName) => FileImage(
               settings.backgroundFile(fileName),
             ),
-            DefaultBackground() => const AssetImage(DefaultBackground.asset),
           };
           return DecoratedBox(
             decoration: BoxDecoration(

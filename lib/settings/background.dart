@@ -10,13 +10,12 @@ sealed class Background {
 
   Map<String, Object?> toJson();
 
-  /// No image (also for unknown or broken values, and for the old
+  /// No image (also for unknown or broken values; for the image that
+  /// used to come with the app, `default` or `mountains`; and for the old
   /// `{'type': 'color'}`, when the color and image were one setting).
   static Background? fromJson(Map<String, Object?>? json) => switch (json) {
     {'type': 'image', 'file': final String file} when file.isNotEmpty =>
       ImageBackground(file),
-    // 'mountains' was the image that came with the app before this one.
-    {'type': 'default' || 'mountains'} => const DefaultBackground(),
     _ => null,
   };
 }
@@ -33,21 +32,6 @@ Color backgroundColorFromJson(Map<String, Object?> settings) =>
         _darkened[argb] ?? Color(argb),
       _ => initialBackgroundColor,
     };
-
-/// The image that ships with the app: what a new profile starts with.
-final class DefaultBackground extends Background {
-  const DefaultBackground();
-
-  static const asset = 'assets/default-background.jpg';
-
-  @override
-  Map<String, Object?> toJson() => {'type': 'default'};
-
-  @override
-  bool operator ==(Object other) => other is DefaultBackground;
-  @override
-  int get hashCode => 0;
-}
 
 /// An image the user picked, copied into the app's backgrounds folder.
 final class ImageBackground extends Background {

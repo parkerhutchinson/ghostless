@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../app_theme.dart';
 import 'label_colors.dart';
+import 'project_labels.dart' show clipLabel, maxLabelLength;
 import 'task_card.dart' show LabelChip;
 
 /// One choice under the label field: an existing [label], or (when
@@ -198,6 +199,7 @@ class _LabelFieldState extends State<LabelField> {
               scrollPhysics: const NeverScrollableScrollPhysics(),
               controller: widget.controller,
               focusNode: widget.focusNode,
+              inputFormatters: const [LabelLengthFormatter()],
               style: const TextStyle(fontSize: 13),
               decoration: InputDecoration(
                 isDense: true,
@@ -372,4 +374,39 @@ class _Swatches extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// Keeps each label typed in a field (several, separated by commas) to
+/// [maxLabelLength] characters: typing past it does nothing; a paste is
+/// cut short.
+class LabelLengthFormatter extends TextInputFormatter {
+  const LabelLengthFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final parts = newValue.text.split(',');
+    bool tooLong(String p) => p.trim().characters.length > maxLabelLength;
+    if (!parts.any(tooLong)) return newValue;
+    // Typed one more: refused, as if the field were full.
+    if (!oldValue.text.split(',').any(tooLong) &&
+        newValue.text.length == oldValue.text.length + 1) {
+      return oldValue;
+    }
+    final text = [
+      for (final p in parts)
+        if (tooLong(p))
+          p.substring(0, p.length - p.trimLeft().length) + clipLabel(p)
+        else
+          p,
+    ].join(',');
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(
+        offset: newValue.selection.end.clamp(0, text.length),
+      ),
+    );
+  }
 }

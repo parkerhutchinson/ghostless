@@ -9,10 +9,12 @@ import '../profiles/profiles_scope.dart';
 import '../projects/project.dart';
 import '../projects/project_repository.dart';
 import '../projects/project_logo.dart';
+import '../projects/project_sidebar.dart' show sidebarBoxSize;
 import '../tasks/due_date.dart';
 import '../tasks/task.dart';
 import '../tasks/task_editor.dart';
 import '../tasks/task_repository.dart';
+import '../widgets/bottom_fade.dart';
 import '../widgets/frosted_bar.dart';
 import 'activity.dart';
 import 'activity_repository.dart';
@@ -56,6 +58,9 @@ class _ActivityPageState extends State<ActivityPage> {
   late final Stream<List<Task>> _tasks = widget.tasks.watch();
   late StreamSubscription<List<Activity>> _markRead;
 
+  /// The list's scroll, for its scrollbar (outside the fade).
+  final _scroll = ScrollController();
+
   /// Unread when shown here: they keep their dot while the page is open.
   final _fresh = <String>{};
 
@@ -91,6 +96,7 @@ class _ActivityPageState extends State<ActivityPage> {
   @override
   void dispose() {
     _markRead.cancel();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -118,6 +124,13 @@ class _ActivityPageState extends State<ActivityPage> {
   void _dismiss(Activity a) => widget.activity.dismiss(a.id);
 
   void _clearAll() => widget.activity.dismissAll(widget.profileId);
+
+  /// Dismisses one day's [items].
+  void _clearDay(Iterable<Activity> items) {
+    for (final a in items) {
+      _dismiss(a);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -176,11 +189,26 @@ class _ActivityPageState extends State<ActivityPage> {
     final now = DateTime.now();
     final children = <Widget>[];
     String? day;
+    // Each day's items, for the headings' counts and Clear.
+    final byDay = <String, List<Activity>>{};
     for (final a in items) {
+      (byDay[_dayLabel(a.createdAt.toLocal(), now)] ??= []).add(a);
+    }
+    for (final (i, a) in items.indexed) {
       final label = _dayLabel(a.createdAt.toLocal(), now);
+      final last =
+          i == items.length - 1 ||
+          _dayLabel(items[i + 1].createdAt.toLocal(), now) != label;
       if (label != day) {
         day = label;
-        children.add(_DayHeading(label, first: children.isEmpty));
+        children.add(
+          _DayHeading(
+            label,
+            count: byDay[label]!.length,
+            first: children.isEmpty,
+            onClear: () => _clearDay(byDay[label]!),
+          ),
+        );
       }
       final task = tasks[a.taskId];
       children.add(
@@ -191,11 +219,27 @@ class _ActivityPageState extends State<ActivityPage> {
           projects: widget.projects,
           onOpen: task == null ? null : () => _open(task),
           onDismiss: () => _dismiss(a),
+          last: last,
         ),
       );
     }
+    // Fades out at the window's bottom while there's more below, like the
+    // board and list. The scrollbar outside the fade (the list's own off),
+    // so it doesn't fade too.
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      child: Scrollbar(
+        controller: _scroll,
+        child: BottomFade(child: _listView(children)),
+      ),
+    );
+  }
+
+  Widget _listView(List<Widget> children) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      controller: _scroll,
+      // Room at the end to scroll the last row clear of the fade.
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, bottomFadeHeight),
       children: [
         // Readable line length on a wide window.
         Center(
@@ -224,21 +268,84 @@ String _dayLabel(DateTime when, DateTime now) {
   };
 }
 
+/// A day's heading, like a board column's: its name and how many, on the
+/// same frosted bar with a line along the bottom.
 class _DayHeading extends StatelessWidget {
-  const _DayHeading(this.label, {required this.first});
+  const _DayHeading(
+    this.label, {
+    required this.count,
+    required this.first,
+    required this.onClear,
+  });
   final String label;
+  final int count;
   final bool first;
+
+  /// Dismisses the day's items.
+  final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.fromLTRB(12, first ? 0 : 20, 12, 6),
-    child: Text(
-      label.toUpperCase(),
-      style: TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.8,
-        color: context.colors.text,
+    padding: EdgeInsets.only(top: first ? 0 : 20, bottom: 6),
+    child: FrostedHeader(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: SizedBox(
+          // As tall as a column heading (its + and ⋯ are 26).
+          height: 26,
+          child: Row(
+            spacing: 8,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                decoration: BoxDecoration(color: context.colors.card),
+                child: Text(
+                  '$count',
+                  style: TextStyle(fontSize: 12, color: context.colors.text),
+                ),
+              ),
+              const Spacer(),
+              // At the right, like a column heading's buttons: no fill
+              // until hovered, then the count's shade; square.
+              TextButton(
+                onPressed: onClear,
+                style:
+                    TextButton.styleFrom(
+                      foregroundColor: context.colors.text,
+                      textStyle: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w400,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 26),
+                      fixedSize: const Size.fromHeight(26),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      shape: const RoundedRectangleBorder(),
+                      splashFactory: NoSplash.splashFactory,
+                    ).copyWith(
+                      overlayColor: const WidgetStatePropertyAll(
+                        Colors.transparent,
+                      ),
+                      backgroundColor: WidgetStateProperty.resolveWith(
+                        (states) =>
+                            states.contains(WidgetState.hovered) ||
+                                states.contains(WidgetState.pressed)
+                            ? context.colors.card
+                            : null,
+                      ),
+                    ),
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+        ),
       ),
     ),
   );
@@ -246,7 +353,7 @@ class _DayHeading extends StatelessWidget {
 
 /// One activity: who did it, to which task, what changed, and when.
 /// Opens the task (unless it's been deleted).
-class _ActivityRow extends StatelessWidget {
+class _ActivityRow extends StatefulWidget {
   const _ActivityRow({
     required this.activity,
     required this.task,
@@ -254,9 +361,13 @@ class _ActivityRow extends StatelessWidget {
     required this.projects,
     required this.onOpen,
     required this.onDismiss,
+    required this.last,
   });
 
   final Activity activity;
+
+  /// The last of its day: the box's bottom line under it.
+  final bool last;
 
   /// The task now; null once it's deleted.
   final Task? task;
@@ -270,7 +381,23 @@ class _ActivityRow extends StatelessWidget {
   final VoidCallback onDismiss;
 
   @override
+  State<_ActivityRow> createState() => _ActivityRowState();
+}
+
+class _ActivityRowState extends State<_ActivityRow> {
+  /// The pointer is on it: the ✕ shows.
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
+    final _ActivityRow(
+      :activity,
+      :task,
+      :fresh,
+      :projects,
+      :onOpen,
+      :onDismiss,
+    ) = widget;
     final scope = ProfilesScope.maybeOf(context);
     final actor = scope?.find(activity.actorId);
     final name = actor?.displayName ?? 'Someone';
@@ -319,92 +446,117 @@ class _ActivityRow extends StatelessWidget {
     final muted = context.colors.mutedText;
     final when = activity.createdAt.toLocal();
 
-    // Each row on the background color, a few px apart, so it reads over a
-    // background image.
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+    // Like the list view's rows: square, on the card shade, a day's rows
+    // boxed together (the sides, a line above each, the bottom under the
+    // last); the hover fills the row edge to edge.
+    final line = BorderSide(color: context.colors.cardBorder);
+    return DecoratedBox(
+      // On top, so the hover fill doesn't cover it.
+      position: DecorationPosition.foreground,
+      decoration: BoxDecoration(
+        border: Border(
+          left: line,
+          right: line,
+          top: line,
+          bottom: widget.last ? line : BorderSide.none,
+        ),
+      ),
       child: Material(
-        color: context.colors.surface,
-        shape: formShape,
+        color: _hover ? context.colors.rowHover : context.colors.card,
         child: InkWell(
           onTap: onOpen,
-          customBorder: formShape,
-          hoverColor: context.colors.hover,
+          onHover: (h) => setState(() => _hover = h),
+          // No ripple or press shade, like the list's rows.
+          splashFactory: NoSplash.splashFactory,
+          highlightColor: Colors.transparent,
+          hoverColor: Colors.transparent,
           mouseCursor: onOpen == null
               ? SystemMouseCursors.basic
               : SystemMouseCursors.click,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              spacing: 12,
-              children: [
-                // Reminders: a calendar or alarm where a person's avatar goes.
-                if (activity.kind.isReminder)
-                  SizedBox.square(
-                    dimension: 28,
-                    child: Icon(
-                      activity.kind == ActivityKind.overdue
-                          ? Symbols.alarm
-                          : Symbols.event,
-                      size: 22,
-                    ),
-                  )
-                else if (actor != null)
-                  ProfileAvatar(
-                    profile: actor,
-                    image: scope?.imageOf(actor),
-                    size: 28,
-                  )
-                else
-                  Icon(Symbols.account_circle, size: 28, color: muted),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    spacing: 3,
-                    children: [
-                      Text.rich(
-                        TextSpan(
-                          style: TextStyle(fontSize: 13.5, color: text),
-                          children: sentence,
-                        ),
-                      ),
-                      for (final d in details)
-                        if (d.isNotEmpty)
-                          Text(
-                            d,
-                            style: TextStyle(fontSize: 12.5, color: muted),
-                          ),
-                      if (project != null)
-                        Row(
-                          spacing: 6,
-                          children: [
-                            ProjectIcon(project: project, size: 12),
-                            Flexible(
-                              child: Text(
-                                project.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 12, color: muted),
-                              ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            // As tall as its text, so the time can sit centered in it.
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: 12,
+                children: [
+                  // Reminders: a calendar or alarm where a person's avatar goes.
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: activity.kind.isReminder
+                        ? SizedBox.square(
+                            dimension: 28,
+                            child: Icon(
+                              activity.kind == ActivityKind.overdue
+                                  ? Symbols.alarm
+                                  : Symbols.event,
+                              size: 22,
                             ),
-                          ],
-                        ),
-                    ],
+                          )
+                        : actor != null
+                        ? ProfileAvatar(
+                            profile: actor,
+                            image: scope?.imageOf(actor),
+                            size: 28,
+                          )
+                        : Icon(Symbols.account_circle, size: 28, color: muted),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Row(
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      spacing: 3,
+                      children: [
+                        Text.rich(
+                          TextSpan(
+                            style: TextStyle(fontSize: 13.5, color: text),
+                            children: sentence,
+                          ),
+                        ),
+                        for (final d in details)
+                          if (d.isNotEmpty)
+                            Text(
+                              d,
+                              style: TextStyle(fontSize: 12.5, color: muted),
+                            ),
+                        if (project != null)
+                          Row(
+                            spacing: 6,
+                            children: [
+                              ProjectIcon(project: project, size: 12),
+                              Flexible(
+                                child: Text(
+                                  project.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 12, color: muted),
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
+                  Row(
                     mainAxisSize: MainAxisSize.min,
                     spacing: 8,
                     children: [
-                      Text(
-                        formatTime(when.hour * 60 + when.minute),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: muted,
-                          fontFeatures: const [FontFeature.tabularFigures()],
+                      // The time, centered, in a light border like the
+                      // sidebar's task counts.
+                      Container(
+                        height: sidebarBoxSize,
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: context.colors.cardBorder),
+                        ),
+                        child: Text(
+                          formatTime(when.hour * 60 + when.minute),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: muted,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
                         ),
                       ),
                       // Unread: a dot in the accent color.
@@ -418,21 +570,48 @@ class _ActivityRow extends StatelessWidget {
                               )
                             : null,
                       ),
-                      // Dismiss (above the row's tap: it doesn't open it).
-                      SizedBox.square(
-                        dimension: 22,
-                        child: IconButton(
-                          onPressed: onDismiss,
-                          tooltip: 'Dismiss',
-                          padding: EdgeInsets.zero,
-                          iconSize: 16,
-                          icon: Icon(Symbols.close, color: muted),
+                      // Dismiss (above the row's tap: it doesn't open it),
+                      // only while hovered; its room kept so nothing
+                      // shifts.
+                      // A little in from the row's right edge.
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: Visibility(
+                          visible: _hover,
+                          maintainSize: true,
+                          maintainAnimation: true,
+                          maintainState: true,
+                          // Like a project's edit button in the sidebar: a
+                          // box the time's size, filled.
+                          child: IconButton(
+                            onPressed: onDismiss,
+                            iconSize: 14,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints.tightFor(
+                              width: sidebarBoxSize,
+                              height: sidebarBoxSize,
+                            ),
+                            style: context.colors.menuButtonStyle.copyWith(
+                              minimumSize: const WidgetStatePropertyAll(
+                                Size.square(sidebarBoxSize),
+                              ),
+                              fixedSize: const WidgetStatePropertyAll(
+                                Size.square(sidebarBoxSize),
+                              ),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              // Square, like the rest of the page.
+                              shape: const WidgetStatePropertyAll(
+                                RoundedRectangleBorder(),
+                              ),
+                            ),
+                            icon: const Icon(Symbols.close),
+                          ),
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

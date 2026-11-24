@@ -1,3 +1,5 @@
+import 'package:characters/characters.dart';
+
 import 'dart:async';
 
 import '../data/ids.dart';
@@ -5,6 +7,7 @@ import '../profiles/profile_repository.dart';
 import '../projects/project.dart';
 import '../projects/project_repository.dart';
 import '../tasks/due_date.dart';
+import '../tasks/project_labels.dart' show maxLabelLength;
 import '../tasks/task.dart';
 import '../tasks/task_repository.dart';
 import 'task_change_feed.dart';
@@ -241,7 +244,9 @@ final class McpTools {
           'dueTime': _string(
             'Due time of day, HH:MM (24-hour); needs dueDate.',
           ),
-          'labels': _strings('Labels to put on it.'),
+          'labels': _strings(
+            'Labels to put on it (each at most $maxLabelLength characters).',
+          ),
           'subtasks': _strings('Subtask titles, in order.'),
         },
         required: ['project', 'title'],
@@ -251,7 +256,7 @@ final class McpTools {
         final title = _requiredString(args, 'title').trim();
         if (title.isEmpty) throw const McpToolError('The title is empty.');
         final dueDate = _day(args['dueDate']);
-        final labels = _stringList(args['labels']);
+        final labels = _labels(args['labels']);
         final created = tasks.create(
           title: title,
           description: (args['description'] as String? ?? '').trim(),
@@ -340,7 +345,7 @@ final class McpTools {
           task = task.copyWith(dueTime: _time(args['dueTime']));
         }
         if (args['labels'] != null) {
-          final labels = _stringList(args['labels']);
+          final labels = _labels(args['labels']);
           task = task.copyWith(tags: labels);
           projects.addLabels(task.originId, labels);
         }
@@ -743,6 +748,20 @@ List<String> _stringList(Object? value) => switch (value) {
   ],
   _ => throw const McpToolError('Expected a list of text.'),
 };
+
+/// Labels from [value], each at most [maxLabelLength] characters.
+List<String> _labels(Object? value) {
+  final labels = _stringList(value);
+  for (final l in labels) {
+    if (l.characters.length > maxLabelLength) {
+      throw McpToolError(
+        'The label "$l" is too long: labels can be at most '
+        '$maxLabelLength characters.',
+      );
+    }
+  }
+  return labels;
+}
 
 DateTime? _day(Object? value) => switch (value) {
   null => null,

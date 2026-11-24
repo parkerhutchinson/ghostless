@@ -215,6 +215,23 @@ void main() {
       expect(tasks.get(id), isNull);
     });
 
+    test('labels over 25 characters are turned down', () {
+      expect(
+        () => run('create_task', {
+          'project': launch.id,
+          'title': 'T',
+          'labels': ['x' * 26],
+        }),
+        throwsA(
+          isA<McpToolError>().having(
+            (e) => e.message,
+            'message',
+            contains('at most 25'),
+          ),
+        ),
+      );
+    });
+
     test('mistakes are explained, listing what there is', () {
       expect(
         () => run('list_tasks', {'project': 'Nope'}),

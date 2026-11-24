@@ -1,6 +1,7 @@
 import 'dart:io';
 
-import 'package:codename/app_theme.dart' show accentText, defaultAccent, isLightColor, onAccentColor;
+import 'package:codename/app_theme.dart'
+    show accentText, defaultAccent, isLightColor, onAccentColor;
 import 'package:codename/layout.dart';
 import 'package:codename/settings/background.dart';
 import 'package:codename/settings/settings_repository.dart';
@@ -43,24 +44,19 @@ void main() {
     settings.setBackgroundColor(const Color(0xFF3A0F55));
     settings.setAccent(const Color(0xFFC62828));
     expect(settings.backgroundColor, const Color(0xFF3A0F55));
-    settings.setBackground(const DefaultBackground());
+    settings.setBackground(null);
     expect(settings.accent, const Color(0xFFC62828));
   });
 
-  test('the background starts out as the default image over about 80% '
-      'black', () {
-    expect(settings.background, const DefaultBackground());
+  test('the background starts out as no image over about 80% black', () {
+    expect(settings.background, isNull);
+    expect(settings.uploadedImage, isNull);
     expect(settings.backgroundColor, const Color(0xFF2D2D2D));
   });
 
-  test('the default image is saved and read back; the old mountains load '
-      'as it', () {
-    settings.setBackground(const DefaultBackground());
-    expect(settings.background, const DefaultBackground());
-    expect(
-      Background.fromJson({'type': 'mountains'}),
-      const DefaultBackground(),
-    );
+  test('the image that used to come with the app loads as no image', () {
+    expect(Background.fromJson({'type': 'default'}), isNull);
+    expect(Background.fromJson({'type': 'mountains'}), isNull);
   });
 
   test('a chosen color is saved and read back', () {
@@ -75,7 +71,7 @@ void main() {
       'image', () async {
     settings.setBackgroundColor(const Color(0xFF003A33));
     final image = await settings.setBackgroundImage(picked('a.png').path);
-    settings.setBackground(const DefaultBackground());
+    settings.setBackground(null);
     expect(settings.backgroundColor, const Color(0xFF003A33));
     settings.setBackground(image);
     settings.setBackgroundColor(const Color(0xFF6D1616));
@@ -92,7 +88,7 @@ void main() {
     expect(settings.background, isNull);
     expect(settings.backgroundColor, const Color(0xFF003A33));
     // Kept when the image changes.
-    settings.setBackground(const DefaultBackground());
+    settings.setBackground(null);
     expect(settings.backgroundColor, const Color(0xFF003A33));
   });
 
@@ -141,20 +137,41 @@ void main() {
     expect(settings.backgroundFile(b.fileName).readAsBytesSync(), [1, 2, 3]);
   });
 
-  test('replacing a picked image deletes the old copy', () async {
+  test('replacing an uploaded image deletes the old copy', () async {
     final first = await settings.setBackgroundImage(picked('a.png').path);
     final second = await settings.setBackgroundImage(picked('b.png').path);
     expect(settings.backgroundFile(first.fileName).existsSync(), isFalse);
     expect(settings.backgroundFile(second.fileName).existsSync(), isTrue);
+    expect(settings.uploadedImage, second.fileName);
+  });
 
+  test('choosing no image keeps the uploaded one to pick again', () async {
+    final image = await settings.setBackgroundImage(picked('a.png').path);
     settings.setBackground(null);
-    expect(settings.backgroundFile(second.fileName).existsSync(), isFalse);
+    expect(settings.background, isNull);
+    expect(settings.uploadedImage, image.fileName);
+    settings.deleteUnusedBackgroundImages();
+    expect(settings.backgroundFile(image.fileName).existsSync(), isTrue);
+    // Still there after a restart, and picked again.
+    final again = SettingsRepository(store, dir);
+    expect(again.uploadedImage, image.fileName);
+    again.setBackground(ImageBackground(again.uploadedImage!));
+    expect(again.background, image);
+  });
+
+  test('an image saved before uploads were kept is the uploaded one', () {
+    store.put('ui', 'settings', {
+      'background': {'type': 'image', 'file': 'old.png'},
+    });
+    expect(settings.uploadedImage, 'old.png');
+    settings.setBackground(null);
+    expect(settings.uploadedImage, 'old.png');
   });
 
   test('other settings in the same record are kept', () {
     store.put('ui', 'settings', {'other': 1});
     settings.setBackgroundColor(const Color(0xFF121212));
-    settings.setBackground(const DefaultBackground());
+    settings.setBackground(null);
     expect(store.get('ui', 'settings')!['other'], 1);
   });
 
@@ -181,9 +198,9 @@ void main() {
     store.put('ui', 'workspace', {'projectId': 'x'}); // unrelated
     await pumpEventQueue();
     settings.setBackgroundColor(const Color(0xFF19451C)); // not the image
-    settings.setBackground(null);
+    settings.setBackground(const ImageBackground('a.png'));
     await pumpEventQueue();
     await sub.cancel();
-    expect(seen, [const DefaultBackground(), null]);
+    expect(seen, [null, const ImageBackground('a.png')]);
   });
 }

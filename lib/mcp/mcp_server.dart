@@ -12,7 +12,7 @@ const mcpProtocolVersions = ['2025-11-25', '2025-06-18', '2025-03-26'];
 const mcpPath = '/mcp';
 
 /// The app's MCP server (Model Context Protocol, "Streamable HTTP"): AI
-/// assistants such as Claude connect to it and use [McpTools] to read and
+/// agents connect to it and use [McpTools] to read and
 /// change projects and tasks while the app is open.
 ///
 /// Only reachable from this Mac (it listens on 127.0.0.1), and only with

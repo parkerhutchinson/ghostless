@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -17,6 +19,7 @@ import 'form_buttons.dart';
 import 'task_editor.dart';
 import 'task_repository.dart';
 import '../app_theme.dart';
+import '../widgets/sliding_toggle.dart';
 
 enum TaskView { board, list }
 
@@ -43,16 +46,22 @@ class TasksPage extends StatefulWidget {
     required this.projectId,
     this.projects = const [],
     required this.projectRepo,
-    this.openTaskId,
+    this.openRequest,
     this.onTaskOpened,
+    this.onSearch,
   });
 
   final TaskRepository repo;
 
   /// A task to open in the editor as soon as the page shows (e.g. one
-  /// clicked in Activity); [onTaskOpened] is called once it has been.
-  final String? openTaskId;
+  /// clicked in Activity or found by search); [onTaskOpened] is called
+  /// once it has been. Each request has its own [serial], so the same
+  /// task asked for again opens again.
+  final ({String taskId, int serial})? openRequest;
   final VoidCallback? onTaskOpened;
+
+  /// Opens search: the magnifying glass in the header (⌘K too).
+  final VoidCallback? onSearch;
 
   /// Shown in the header: the project's name.
   final String title;
@@ -71,7 +80,7 @@ class TasksPage extends StatefulWidget {
   State<TasksPage> createState() => _TasksPageState();
 }
 
-class _TasksPageState extends State<TasksPage> {
+class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
   TaskView _view = TaskView.board;
   late final Stream<List<Task>> _tasks = widget.repo.watch();
 
@@ -91,43 +100,139 @@ class _TasksPageState extends State<TasksPage> {
   /// Every task in a personal project is its owner's: no assignee shown.
   bool get _showAssignee => !(_project?.isPersonal ?? false);
 
-  void _open(Task task) => showTaskEditor(
-    context,
-    widget.repo,
-    task: task,
-    projectId: widget.projectId,
-    projects: widget.projects,
-    projectRepo: widget.projectRepo,
-    onDelete: task.originId == widget.projectId ? _delete : null,
-  );
+  /// The task open in the form: its card or row is outlined in the
+  /// accent until the form closes.
+  /// (A notifier, so only the outlines redraw, not the whole board: a
+  /// full rebuild of a big board made the form's animations skip.)
+  final _openTask = ValueNotifier<String?>(null);
+
+  Future<void> _open(Task task) async {
+    _openTask.value = task.id;
+    await showTaskEditor(
+      context,
+      widget.repo,
+      task: task,
+      projectId: widget.projectId,
+      projects: widget.projects,
+      projectRepo: widget.projectRepo,
+      onDelete: task.originId == widget.projectId ? _delete : null,
+    );
+    if (_openTask.value == task.id) _openTask.value = null;
+  }
 
   @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_onKey);
     _openRequested();
+    _deferBoard();
   }
 
   @override
   void didUpdateWidget(TasksPage old) {
     super.didUpdateWidget(old);
-    if (widget.openTaskId != old.openTaskId) _openRequested();
+    if (widget.openRequest != old.openRequest) _openRequested();
+    if (widget.projectId != old.projectId) _deferBoard();
   }
 
-  /// Opens [TasksPage.openTaskId], after this frame (once the page is up).
-  void _openRequested() {
-    final id = widget.openTaskId;
-    if (id == null) return;
+  /// A project with more tasks than this shows a spinner for a frame
+  /// before its board, so the click (the sidebar's highlight, the header)
+  /// shows at once instead of waiting for every card to be built.
+  static const _deferAbove = 40;
+
+  /// False while the spinner stands in for the board (see [_deferBoard]).
+  bool _boardReady = true;
+
+  /// On opening a big project: the spinner this frame, the board the next.
+  void _deferBoard() {
+    _boardFade.value = 0;
+    final id = widget.projectId;
+    if (widget.repo.inProject(id).length <= _deferAbove) {
+      _boardReady = true;
+      _fadeInAfterFrame(id);
+      return;
+    }
+    _boardReady = false;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || widget.openTaskId != id) return;
+      if (mounted && widget.projectId == id) {
+        setState(() => _boardReady = true);
+        _fadeInAfterFrame(id);
+      }
+    });
+  }
+
+  /// A project's tasks fade in once they're built (not with them: building
+  /// a big board can take longer than the fade). Set by [_fadeTick].
+  late final _boardFade = AnimationController(vsync: this, value: 1);
+
+  late final _boardOpacity = CurvedAnimation(
+    parent: _boardFade,
+    curve: Curves.easeOut,
+  );
+
+  /// Starts the fade after the frame now being built (the board's).
+  void _fadeInAfterFrame(String projectId) =>
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.projectId == projectId) _startFade();
+      });
+
+  /// Drives [_boardFade] one step per frame, each at most a 60fps frame's
+  /// worth: when the first frames after a switch are slow (drawing all the
+  /// new cards), the fade slows down with them instead of being over
+  /// before it's seen.
+  late final Ticker _fadeTicker = createTicker(_fadeTick);
+  Duration? _lastFadeTick;
+
+  static const _fadeDuration = Duration(milliseconds: 250);
+  static const _maxFadeStep = Duration(microseconds: 16667);
+
+  void _startFade() {
+    _lastFadeTick = null;
+    _fadeTicker
+      ..stop()
+      ..start();
+  }
+
+  void _fadeTick(Duration elapsed) {
+    final last = _lastFadeTick;
+    _lastFadeTick = elapsed;
+    if (last == null) return; // The first tick: no time has passed yet.
+    final step = elapsed - last;
+    final capped = step > _maxFadeStep ? _maxFadeStep : step;
+    final value =
+        _boardFade.value + capped.inMicroseconds / _fadeDuration.inMicroseconds;
+    _boardFade.value = value.clamp(0.0, 1.0);
+    if (value >= 1) _fadeTicker.stop();
+  }
+
+  /// Board ⇄ list (once the toggle has slid): the other fades in once
+  /// built, as on switching projects.
+  void _switchView(TaskView view) {
+    _fadeTicker.stop();
+    _boardFade.value = 0;
+    setState(() => _view = view);
+    _fadeInAfterFrame(widget.projectId);
+  }
+
+  /// Opens [TasksPage.openRequest]'s task, after this frame (once the page
+  /// is up).
+  void _openRequested() {
+    final request = widget.openRequest;
+    if (request == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || widget.openRequest != request) return;
       widget.onTaskOpened?.call();
-      if (widget.repo.get(id) case final task?) _open(task);
+      if (widget.repo.get(request.taskId) case final task?) _open(task);
     });
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onKey);
+    _openTask.dispose();
+    _fadeTicker.dispose();
+    _boardOpacity.dispose();
+    _boardFade.dispose();
     super.dispose();
   }
 
@@ -251,6 +356,7 @@ class _TasksPageState extends State<TasksPage> {
           widget.repo.toggleCompleted(task.id, projectId: widget.projectId),
       onAssign: (id) => widget.repo.assign(task.id, id),
       showAssignee: _showAssignee,
+      onDuplicate: () => _duplicate(task),
       onDelete: isOrigin ? () => _delete(task) : null,
       onRemoveFromProject: isOrigin ? null : () => _removeFromProject(task),
     );
@@ -277,24 +383,41 @@ class _TasksPageState extends State<TasksPage> {
         showAssignee: _showAssignee,
       );
     }
-    return TaskCard(
+    return OpenOutline(
       key: ValueKey(task.id),
-      task: task,
-      repo: widget.repo,
-      multiHomes: multiHomes,
-      onOpen: () => _open(task),
-      completed: task.isCompletedIn(widget.projectId),
-      onToggleCompleted: () =>
-          widget.repo.toggleCompleted(task.id, projectId: widget.projectId),
-      onToggleSubtask: (id) => widget.repo.toggleSubtask(task.id, id),
-      onAssign: (id) => widget.repo.assign(task.id, id),
-      showAssignee: _showAssignee,
-      subtasksExpanded: expanded,
-      onToggleSubtasks: () => setState(
-        () => expanded ? _expandedCards.remove(key) : _expandedCards.add(key),
+      openTask: _openTask,
+      taskId: task.id,
+      child: TaskCard(
+        task: task,
+        repo: widget.repo,
+        multiHomes: multiHomes,
+        onOpen: () => _open(task),
+        completed: task.isCompletedIn(widget.projectId),
+        onToggleCompleted: () =>
+            widget.repo.toggleCompleted(task.id, projectId: widget.projectId),
+        onToggleSubtask: (id) => widget.repo.toggleSubtask(task.id, id),
+        onAssign: (id) => widget.repo.assign(task.id, id),
+        showAssignee: _showAssignee,
+        subtasksExpanded: expanded,
+        onToggleSubtasks: () => setState(
+          () => expanded ? _expandedCards.remove(key) : _expandedCards.add(key),
+        ),
+        onDuplicate: () => _duplicate(task),
+        onDelete: isOrigin ? () => _delete(task) : null,
+        onRemoveFromProject: isOrigin ? null : () => _removeFromProject(task),
       ),
-      onDelete: isOrigin ? () => _delete(task) : null,
-      onRemoveFromProject: isOrigin ? null : () => _removeFromProject(task),
+    );
+  }
+
+  /// Copies [task] just below it, on every board it's on (like the task
+  /// form's Duplicate), with Undo.
+  Future<void> _duplicate(Task task) async {
+    final copy = await widget.repo.duplicate(task.id);
+    if (copy == null || !mounted) return;
+    showUndoSnackBar(
+      context,
+      'Duplicated "${task.title}"',
+      onUndo: () => widget.repo.delete(copy.id),
     );
   }
 
@@ -332,13 +455,28 @@ class _TasksPageState extends State<TasksPage> {
               ownerId: _project?.ownerId,
               logo: _project?.logo,
               view: _view,
-              onViewChanged: (v) => setState(() => _view = v),
+              onViewChanged: _switchView,
+              onSearch: widget.onSearch,
             ),
             Expanded(
               child: StreamBuilder<List<Task>>(
                 stream: _tasks,
                 initialData: widget.repo.current(),
                 builder: (context, snapshot) {
+                  // A big project's board comes a frame later: a
+                  // spinner until then (see _deferBoard). Here, inside
+                  // the builder, so the tasks stay listened to.
+                  if (!_boardReady) {
+                    return Center(
+                      child: SizedBox.square(
+                        dimension: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: context.colors.mutedText,
+                        ),
+                      ),
+                    );
+                  }
                   // Each project has its own board: tasks as placed
                   // here (column and order).
                   // A status this board has no column for (deleted, or
@@ -362,46 +500,55 @@ class _TasksPageState extends State<TasksPage> {
                     ))
                       t.copyWith(status: columnFor(t.status)),
                   ];
-                  return switch (_view) {
-                    TaskView.board => TaskBoard(
-                      tasks: tasks,
-                      repo: widget.repo,
-                      projectId: widget.projectId,
-                      card: _card,
-                      onCreate: _create,
-                      columns: columns,
-                      onRenameColumn: (id, name) => widget.projectRepo
-                          .renameColumn(widget.projectId, id, name),
-                      onMoveColumn: (id, index) => widget.projectRepo
-                          .moveColumn(widget.projectId, id, index),
-                      onDeleteColumn: _deleteColumn,
-                      onAddColumn: _addColumn,
-                      editingColumnId: _newColumnId,
-                    ),
-                    TaskView.list => _TaskList(
-                      tasks: tasks,
-                      showAssignee: _showAssignee,
-                      row: _row,
-                      columns: columns,
-                      onMove: (task, columnId, index) => widget.repo.move(
-                        task.id,
-                        columnId,
-                        index,
+                  return FadeTransition(
+                    opacity: _boardOpacity,
+                    // Keyed by project: another project's board or list
+                    // starts fresh, scrolled to the start (not where the
+                    // last one was left).
+                    child: switch (_view) {
+                      TaskView.board => TaskBoard(
+                        key: ValueKey(widget.projectId),
+                        tasks: tasks,
+                        repo: widget.repo,
                         projectId: widget.projectId,
+                        card: _card,
+                        onCreate: _create,
+                        columns: columns,
+                        onRenameColumn: (id, name) => widget.projectRepo
+                            .renameColumn(widget.projectId, id, name),
+                        onMoveColumn: (id, index) => widget.projectRepo
+                            .moveColumn(widget.projectId, id, index),
+                        onDeleteColumn: _deleteColumn,
+                        onAddColumn: _addColumn,
+                        editingColumnId: _newColumnId,
                       ),
-                      onCreate: _create,
-                      onRenameColumn: (id, name) => widget.projectRepo
-                          .renameColumn(widget.projectId, id, name),
-                      onDeleteColumn: _deleteColumn,
-                      onAddColumn: () => _addColumn('New section'),
-                      onMoveColumn: (id, index) => widget.projectRepo
-                          .moveColumn(widget.projectId, id, index),
-                      onToggleSubtask: widget.repo.toggleSubtask,
-                      onMoveSubtask: widget.repo.moveSubtask,
-                      projectId: widget.projectId,
-                      editingColumnId: _newColumnId,
-                    ),
-                  };
+                      TaskView.list => _TaskList(
+                        key: ValueKey(widget.projectId),
+                        tasks: tasks,
+                        openTask: _openTask,
+                        showAssignee: _showAssignee,
+                        row: _row,
+                        columns: columns,
+                        onMove: (task, columnId, index) => widget.repo.move(
+                          task.id,
+                          columnId,
+                          index,
+                          projectId: widget.projectId,
+                        ),
+                        onCreate: _create,
+                        onRenameColumn: (id, name) => widget.projectRepo
+                            .renameColumn(widget.projectId, id, name),
+                        onDeleteColumn: _deleteColumn,
+                        onAddColumn: () => _addColumn('New section'),
+                        onMoveColumn: (id, index) => widget.projectRepo
+                            .moveColumn(widget.projectId, id, index),
+                        onToggleSubtask: widget.repo.toggleSubtask,
+                        onMoveSubtask: widget.repo.moveSubtask,
+                        projectId: widget.projectId,
+                        editingColumnId: _newColumnId,
+                      ),
+                    },
+                  );
                 },
               ),
             ),
@@ -429,9 +576,13 @@ class _Header extends StatelessWidget {
     this.logo,
     required this.view,
     required this.onViewChanged,
+    this.onSearch,
   });
 
   final String title;
+
+  /// The magnifying glass, right of the view toggle.
+  final VoidCallback? onSearch;
 
   /// The project's color, shown as a dot before the title (none on pages
   /// that aren't one project).
@@ -482,46 +633,49 @@ class _Header extends StatelessWidget {
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+                // Always white, whatever the theme (even a light one).
                 style: const TextStyle(
                   fontSize: 26,
                   fontWeight: FontWeight.w700,
+                  color: Colors.white,
                 ),
               ),
             ),
           ),
-          SegmentedButton<TaskView>(
-            showSelectedIcon: false,
-            style: SegmentedButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              // Light and small, like the labels.
-              textStyle: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w400,
-              ),
-              // Same border color as the task cards.
-              side: BorderSide(color: context.colors.cardBorder),
-              // The inactive view on the background color, so it reads
-              // over a background image; the active one on the accent.
-              backgroundColor: context.colors.surface,
-              selectedBackgroundColor: Theme.of(context)
-                  .colorScheme
-                  .secondaryContainer,
-            ),
+          SlidingToggle<TaskView>(
             segments: const [
-              ButtonSegment(
+              ToggleSegment(
                 value: TaskView.board,
-                icon: Icon(Symbols.view_week, size: 16),
-                label: Text('Board'),
+                icon: Symbols.view_week,
+                label: 'Board',
               ),
-              ButtonSegment(
+              ToggleSegment(
                 value: TaskView.list,
-                icon: Icon(Symbols.view_agenda, size: 16),
-                label: Text('List'),
+                icon: Symbols.view_agenda,
+                label: 'List',
               ),
             ],
-            selected: {view},
-            onSelectionChanged: (s) => onViewChanged(s.single),
+            selected: view,
+            onChanged: onViewChanged,
           ),
+          // Search: a square the toggle's height, in its style (border,
+          // the background color).
+          if (onSearch case final search?)
+            IconButton(
+              tooltip: 'Search  ⌘K',
+              onPressed: search,
+              iconSize: 18,
+              padding: EdgeInsets.zero,
+              style: IconButton.styleFrom(
+                fixedSize: const Size.square(32),
+                minimumSize: const Size.square(32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                backgroundColor: context.colors.surface,
+                side: BorderSide(color: context.colors.cardBorder),
+                shape: formShape,
+              ),
+              icon: Icon(Symbols.search, color: context.colors.text),
+            ),
         ],
       ),
     );
@@ -534,7 +688,9 @@ class _Header extends StatelessWidget {
 /// fields in columns (see [TaskTable]).
 class _TaskList extends StatefulWidget {
   const _TaskList({
+    super.key,
     required this.tasks,
+    required this.openTask,
     required this.row,
     required this.columns,
     required this.onMove,
@@ -586,6 +742,9 @@ class _TaskList extends StatefulWidget {
   /// Moves a task's subtask to an index (counted without it).
   final void Function(String taskId, String subtaskId, int index) onMoveSubtask;
 
+  /// The task open in the form: its row is outlined in the accent.
+  final ValueListenable<String?> openTask;
+
   /// Moves a dragged task into a column's group at an index (counted
   /// without the task itself), like dropping a card on the board.
   final void Function(Task task, String columnId, int index) onMove;
@@ -599,6 +758,15 @@ class _TaskListState extends State<_TaskList> {
   /// in several projects is expanded in each separately. (This state
   /// stays when another project is shown, so each keeps its own.)
   final _expanded = <(String projectId, String taskId)>{};
+
+  /// The list's scroll, for its scrollbar (outside the fade).
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   /// Drops [dragged] into [column]'s [group] just before [beforeId], or at
   /// the end when null.
@@ -615,9 +783,40 @@ class _TaskListState extends State<_TaskList> {
     widget.onMove(dragged, column.id, index);
   }
 
+  /// Sections collapsed into their heading (rows hidden), per project.
+  final _collapsed = <(String projectId, String columnId)>{};
+
+  void _toggleCollapsed(String columnId) => setState(() {
+    final key = (widget.projectId, columnId);
+    if (!_collapsed.remove(key)) _collapsed.add(key);
+  });
+
+  /// The section a dragged section is over (its id): its slices draw one
+  /// highlight around it.
+  String? _sectionHover;
+
   @override
   Widget build(BuildContext context) {
     final tasks = widget.tasks;
+    // Every section's heading, rows (or "No tasks") as separate items, so
+    // the list only builds what's on screen, and its items are all about
+    // a row's height: the scrollbar's estimate of the whole list barely
+    // changes as it scrolls (whole sections as items made it jump).
+    final items = <_ListItem>[];
+    for (final (i, column) in widget.columns.indexed) {
+      final group = tasks.where((t) => t.status == column.id).toList();
+      items.add(_ListItem(i, column, group, null));
+      // Collapsed: just the heading.
+      if (_collapsed.contains((widget.projectId, column.id))) continue;
+      if (group.isEmpty) {
+        items.add(_ListItem(i, column, group, -1));
+      } else {
+        for (var j = 0; j < group.length; j++) {
+          items.add(_ListItem(i, column, group, j));
+        }
+      }
+    }
+    final keys = {for (final (k, item) in items.indexed) item.key: k};
     return Align(
       alignment: Alignment.topCenter,
       child: ConstrainedBox(
@@ -639,29 +838,47 @@ class _TaskListState extends State<_TaskList> {
               child: LayoutBuilder(
                 // Fades out at the window's bottom while there's more below,
                 // like a full board column.
-                builder: (context, constraints) => BottomFade(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(24, 0, 24, fabClearance),
-                    children: [
-                      // Every column is a section, empty ones too, so each can
-                      // take new tasks and drops.
-                      for (final (i, column) in widget.columns.indexed)
-                        _group(
-                          context,
-                          i,
-                          column,
-                          tasks.where((t) => t.status == column.id).toList(),
-                          rowWidth: constraints.maxWidth - 48,
+                // The scrollbar outside the fade, so it doesn't fade too
+                // (the list's own is turned off).
+                builder: (context, constraints) => ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(context)
+                      .copyWith(scrollbars: false),
+                  child: Scrollbar(
+                    controller: _scroll,
+                    child: BottomFade(
+                      child: ListView.builder(
+                        controller: _scroll,
+                        padding: const EdgeInsets.fromLTRB(
+                          24,
+                          0,
+                          24,
+                          fabClearance,
                         ),
-                      Padding(
-                        padding: const EdgeInsets.only(top: 16),
-                        child: AddColumnButton(
-                          label: 'Add section',
-                          width: double.infinity,
-                          onPressed: widget.onAddColumn,
-                        ),
+                        itemCount: items.length + 1,
+                        // Rows keep their state (hover, open menus) as items
+                        // around them come and go.
+                        findChildIndexCallback: (key) => keys[key],
+                        itemBuilder: (context, k) {
+                          if (k == items.length) return _addSection(items);
+                          final item = items[k];
+                          return KeyedSubtree(
+                            key: item.key,
+                            child: _section(
+                              item,
+                              last:
+                                  k + 1 == items.length ||
+                                  items[k + 1].index != item.index,
+                              child: _item(
+                                context,
+                                item,
+                                previous: k == 0 ? null : items[k - 1],
+                                rowWidth: constraints.maxWidth - 48,
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -672,18 +889,177 @@ class _TaskListState extends State<_TaskList> {
     );
   }
 
-  /// A column's heading and its rows in a bordered box. The whole group
-  /// takes drops (at its end); each row takes drops just before it.
-  ///
-  /// Drag a section by its heading to move it: dropped on another section,
-  /// it takes that one's place (the ones between shift up or down).
-  Widget _group(
+  /// "+ Add section", below the last; the space above it takes drops at
+  /// the end of the last section.
+  Widget _addSection(List<_ListItem> items) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _endTarget(items.lastOrNull, height: 16),
+      AddColumnButton(
+        label: 'Add section',
+        width: double.infinity,
+        onPressed: widget.onAddColumn,
+      ),
+    ],
+  );
+
+  /// The space above a section's heading: dropping a task there puts it at
+  /// the end of the section before ([previous]'s), with a line to show it.
+  Widget _endTarget(_ListItem? previous, {double height = 12}) {
+    if (previous == null || previous.group.isEmpty) {
+      return SizedBox(height: height);
+    }
+    final _ListItem(:column, :group) = previous;
+    return DragTarget<Task>(
+      onAcceptWithDetails: (d) => _drop(d.data, column, group, null),
+      builder: (context, candidates, _) => SizedBox(
+        height: height,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: candidates.isEmpty ? null : const _ListDropLine(),
+        ),
+      ),
+    );
+  }
+
+  /// [child], one slice of [item]'s section as a target for a dragged
+  /// section: hovering any slice highlights the whole section (each slice
+  /// draws its part); dropped, it takes that section's place.
+  Widget _section(_ListItem item, {required bool last, required Widget child}) {
+    final TaskColumn(:id) = item.column;
+    final first = item.isHeading;
+    return DragTarget<TaskColumn>(
+      onWillAcceptWithDetails: (d) {
+        if (d.data.id == id) return false;
+        setState(() => _sectionHover = id);
+        return true;
+      },
+      onLeave: (_) {
+        if (_sectionHover == id) setState(() => _sectionHover = null);
+      },
+      onAcceptWithDetails: (d) {
+        setState(() => _sectionHover = null);
+        widget.onMoveColumn(d.data.id, item.index);
+      },
+      builder: (context, _, _) => Stack(
+        clipBehavior: Clip.none,
+        children: [
+          child,
+          if (_sectionHover == id)
+            // A little wider than the section, into the gaps either side;
+            // one outline down its slices.
+            Positioned(
+              left: -6,
+              right: -6,
+              top: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary
+                        .withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.vertical(
+                      top: first ? containerRadius.topLeft : Radius.zero,
+                      bottom: last ? containerRadius.bottomLeft : Radius.zero,
+                    ),
+                    border: _sliceBorder(
+                      Theme.of(context).colorScheme.primary,
+                      top: first,
+                      bottom: last,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// One list item: a section's heading, a row, or an empty section's
+  /// "No tasks". The rows of a section draw its box between them: the
+  /// sides, a line above each, and the bottom under the last.
+  Widget _item(
+    BuildContext context,
+    _ListItem item, {
+    required _ListItem? previous,
+    required double rowWidth,
+  }) {
+    final _ListItem(:index, :column, :group) = item;
+    if (item.isHeading) {
+      return _heading(context, index, column, group, previous, rowWidth);
+    }
+    final empty = item.row == -1;
+    final lastRow = empty || item.row == group.length - 1;
+    final line = BorderSide(color: context.colors.cardBorder);
+    final box = DecoratedBox(
+      // On top, so a hovered row's fill doesn't cover it.
+      position: DecorationPosition.foreground,
+      decoration: BoxDecoration(
+        border: Border(
+          left: line,
+          right: line,
+          top: line,
+          bottom: lastRow ? line : BorderSide.none,
+        ),
+      ),
+      // The rows sit on the card shade (lighter or darker than the
+      // background, like the board's cards); an empty section's "No
+      // tasks" on the background color.
+      child: ColoredBox(
+        color: empty ? context.colors.surface : context.colors.card,
+        child: empty
+            ? DragTarget<Task>(
+                onAcceptWithDetails: (d) => _drop(d.data, column, group, null),
+                builder: (context, candidates, _) => SizedBox(
+                  height: TaskTable.height,
+                  child: Stack(
+                    children: [
+                      Center(
+                        child: Text(
+                          'No tasks',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: context.colors.mutedText,
+                          ),
+                        ),
+                      ),
+                      if (candidates.isNotEmpty)
+                        const Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: _ListDropLine(),
+                        ),
+                    ],
+                  ),
+                ),
+              )
+            : _slot(context, column, group, group[item.row!], rowWidth),
+      ),
+    );
+    if (empty) return box;
+    // Open in the form: outlined in the accent, over the table's lines.
+    return OpenOutline(
+      openTask: widget.openTask,
+      taskId: group[item.row!].id,
+      child: box,
+    );
+  }
+
+  /// A section's heading: its name (click to rename), count, + and ⋯,
+  /// like a board column's. Drag it to move the section: dropped on
+  /// another, it takes that one's place (the ones between shift up or
+  /// down). The space above it takes drops at the end of the section
+  /// before.
+  Widget _heading(
     BuildContext context,
     int index,
     TaskColumn column,
-    List<Task> group, {
-    required double rowWidth,
-  }) {
+    List<Task> group,
+    _ListItem? previous,
+    double rowWidth,
+  ) {
     ColumnHeader header({bool full = true}) => ColumnHeader(
       key: full ? ValueKey(column.id) : null,
       column: column,
@@ -696,101 +1072,50 @@ class _TaskListState extends State<_TaskList> {
           ? null
           : () => widget.onDeleteColumn(column),
       startEditing: full && column.id == widget.editingColumnId,
+      collapsed: _collapsed.contains((widget.projectId, column.id)),
+      onToggleCollapsed: full ? () => _toggleCollapsed(column.id) : null,
     );
     const headerPadding = EdgeInsets.fromLTRB(TaskTable.cellPadding, 12, 4, 0);
     // Inside the glass: the same left and right as headerPadding.
     const glassPadding = EdgeInsets.fromLTRB(TaskTable.cellPadding, 0, 4, 0);
-    return ColumnDropTarget(
-      key: ValueKey(column.id),
-      accepts: (c) => c.id != column.id,
-      onDrop: (c) => widget.onMoveColumn(c.id, index),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Name (click to rename), count, + and ⋯, like a board column's.
-          Draggable<TaskColumn>(
-            data: column,
-            feedback: Material(
-              color: Colors.transparent,
-              child: Container(
-                width: rowWidth,
-                padding: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: context.colors.surface,
-                  border: Border.all(color: context.colors.formBorder),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black38, blurRadius: 12),
-                  ],
-                ),
-                child: Padding(
-                  padding: headerPadding,
-                  child: header(full: false),
-                ),
-              ),
-            ),
-            childWhenDragging: Opacity(
-              opacity: 0.4,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: FrostedHeader(
-                  padding: glassPadding,
-                  child: header(full: false),
-                ),
-              ),
-            ),
-            // On glass, like the page's header, so it reads over an image.
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: FrostedHeader(padding: glassPadding, child: header()),
-              ),
-            ),
-          ),
-          DragTarget<Task>(
-            onAcceptWithDetails: (d) => _drop(d.data, column, group, null),
-            builder: (context, candidates, _) => DecoratedBox(
-              // The group's rows in a bordered box, like the header, so the
-              // column lines meet a border at each end. On top, so a hovered
-              // row's fill doesn't cover it.
-              position: DecorationPosition.foreground,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _endTarget(previous),
+        Draggable<TaskColumn>(
+          data: column,
+          feedback: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: rowWidth,
+              padding: const EdgeInsets.only(bottom: 12),
               decoration: BoxDecoration(
-                border: Border.all(color: context.colors.cardBorder),
+                color: context.colors.surface,
+                border: Border.all(color: context.colors.formBorder),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black38, blurRadius: 12),
+                ],
               ),
-              // The rows sit on the card shade (lighter or darker than the
-              // background, like the board's cards); an empty section's
-              // "No tasks" on the background color.
-              child: ColoredBox(
-                color: group.isEmpty
-                    ? context.colors.surface
-                    : context.colors.card,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (final (i, task) in group.indexed)
-                      _slot(context, column, group, task, i, rowWidth),
-                    // Dropping past the last row (or into an empty group).
-                    if (group.isEmpty)
-                      SizedBox(
-                        height: TaskTable.height,
-                        child: Center(
-                          child: Text(
-                            'No tasks',
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              color: context.colors.mutedText,
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (candidates.isNotEmpty) const _ListDropLine(),
-                  ],
-                ),
+              child: Padding(
+                padding: headerPadding,
+                child: header(full: false),
               ),
             ),
           ),
-        ],
-      ),
+          childWhenDragging: Opacity(
+            opacity: 0.4,
+            child: FrostedHeader(
+              padding: glassPadding,
+              child: header(full: false),
+            ),
+          ),
+          // On glass, like the page's header, so it reads over an image.
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: FrostedHeader(padding: glassPadding, child: header()),
+          ),
+        ),
+      ],
     );
   }
 
@@ -801,7 +1126,6 @@ class _TaskListState extends State<_TaskList> {
     TaskColumn column,
     List<Task> group,
     Task task,
-    int i,
     double rowWidth,
   ) {
     final key = (widget.projectId, task.id);
@@ -822,68 +1146,91 @@ class _TaskListState extends State<_TaskList> {
       onAcceptWithDetails: (d) {
         if (d.data.id != task.id) _drop(d.data, column, group, task.id);
       },
-      builder: (context, candidates, _) => DecoratedBox(
-        // Each row draws the line above it on top of itself, so its hover
-        // fill never covers it (a covered line would jump a pixel). Rows
-        // can differ in height (wrapped tags).
-        position: DecorationPosition.foreground,
-        decoration: BoxDecoration(
-          border: i == 0
-              ? null
-              : Border(top: BorderSide(color: context.colors.cardBorder)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Stack(
-              children: [
-                Draggable<Task>(
-                  data: task,
-                  feedback: Material(
-                    color: Colors.transparent,
-                    child: Container(
-                      width: rowWidth,
-                      decoration: BoxDecoration(
-                        color: context.colors.card,
-                        border: Border.all(color: context.colors.formBorder),
-                        boxShadow: const [
-                          BoxShadow(color: Colors.black38, blurRadius: 12),
-                        ],
-                      ),
-                      child: widget.row(task),
+      // The line above it is drawn by its list item (see _item).
+      builder: (context, candidates, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Stack(
+            children: [
+              Draggable<Task>(
+                data: task,
+                feedback: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    width: rowWidth,
+                    decoration: BoxDecoration(
+                      color: context.colors.card,
+                      border: Border.all(color: context.colors.formBorder),
+                      boxShadow: const [
+                        BoxShadow(color: Colors.black38, blurRadius: 12),
+                      ],
                     ),
+                    child: widget.row(task),
                   ),
-                  // The row's place stays, shaded, while it's dragged.
-                  childWhenDragging: Stack(
-                    children: [
-                      row,
-                      Positioned.fill(
-                        child: ColoredBox(color: context.colors.emptySlot),
-                      ),
-                    ],
-                  ),
-                  child: row,
                 ),
-                if (candidates.any((t) => t?.id != task.id))
-                  const Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    child: _ListDropLine(),
-                  ),
-              ],
-            ),
-            if (expanded)
-              _SubtaskList(
-                task: task,
-                onToggle: (id) => widget.onToggleSubtask(task.id, id),
-                onMove: (id, index) => widget.onMoveSubtask(task.id, id, index),
+                // The row's place stays, shaded, while it's dragged.
+                childWhenDragging: Stack(
+                  children: [
+                    row,
+                    Positioned.fill(
+                      child: ColoredBox(color: context.colors.emptySlot),
+                    ),
+                  ],
+                ),
+                child: row,
               ),
-          ],
-        ),
+              if (candidates.any((t) => t?.id != task.id))
+                const Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: _ListDropLine(),
+                ),
+            ],
+          ),
+          if (expanded)
+            _SubtaskList(
+              task: task,
+              onToggle: (id) => widget.onToggleSubtask(task.id, id),
+              onMove: (id, index) => widget.onMoveSubtask(task.id, id, index),
+            ),
+        ],
       ),
     );
   }
+}
+
+/// One item in the list view: section [index]'s ([column], its tasks
+/// [group]) heading ([row] null), one of its rows ([row] its index), or
+/// "No tasks" when it has none ([row] -1).
+final class _ListItem {
+  const _ListItem(this.index, this.column, this.group, this.row);
+  final int index;
+  final TaskColumn column;
+  final List<Task> group;
+  final int? row;
+
+  bool get isHeading => row == null;
+
+  /// Stable while the list changes around it: the section's heading, or
+  /// the task's row.
+  Key get key => ValueKey(switch (row) {
+    null => 'section:${column.id}',
+    -1 => 'empty:${column.id}',
+    final r => 'task:${group[r].id}',
+  });
+}
+
+/// A section highlight slice's outline: always the sides; the top on its
+/// first slice, the bottom on its last.
+Border _sliceBorder(Color color, {required bool top, required bool bottom}) {
+  final side = BorderSide(color: color);
+  return Border(
+    left: side,
+    right: side,
+    top: top ? side : BorderSide.none,
+    bottom: bottom ? side : BorderSide.none,
+  );
 }
 
 /// An expanded row's subtasks, nested under it as a tree from its
@@ -958,6 +1305,42 @@ class _ListDropLine extends StatelessWidget {
   const _ListDropLine();
 
   @override
-  Widget build(BuildContext context) =>
-      SizedBox(height: 2, child: ColoredBox(color: context.colors.text));
+  Widget build(BuildContext context) => SizedBox(
+    height: 2,
+    // The accent (Settings), like the board's drop line.
+    child: ColoredBox(color: Theme.of(context).colorScheme.primary),
+  );
+}
+
+/// [child] (a task's card or row), outlined in the accent while [openTask]
+/// is its task ([taskId]): the one open in the form. Only this redraws
+/// when the open task changes, not [child].
+class OpenOutline extends StatelessWidget {
+  const OpenOutline({
+    super.key,
+    required this.openTask,
+    required this.taskId,
+    required this.child,
+  });
+
+  final ValueListenable<String?> openTask;
+  final String taskId;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<String?>(
+    valueListenable: openTask,
+    child: child,
+    // Always the same box (no border when not open), so [child] is never
+    // rebuilt or remounted as the outline comes and goes.
+    builder: (context, open, child) => DecoratedBox(
+      position: DecorationPosition.foreground,
+      decoration: BoxDecoration(
+        border: open == taskId
+            ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2)
+            : null,
+      ),
+      child: child,
+    ),
+  );
 }

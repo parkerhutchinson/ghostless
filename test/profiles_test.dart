@@ -5,7 +5,6 @@ import 'package:codename/profiles/profile.dart';
 import 'package:codename/profiles/profile_repository.dart';
 import 'package:codename/projects/project.dart';
 import 'package:codename/projects/project_repository.dart';
-import 'package:codename/settings/background.dart';
 import 'package:codename/settings/settings_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -122,7 +121,7 @@ void main() {
     profiles.create(name: 'Other');
     expect(settings.accent, defaultAccent);
     expect(settings.backgroundColor, isNot(const Color(0xFF19451C)));
-    expect(settings.background, const DefaultBackground());
+    expect(settings.background, isNull);
     profiles.switchTo(me.id);
     expect(settings.accent, const Color(0xFF7A4FD0));
     expect(settings.backgroundColor, const Color(0xFF19451C));
@@ -156,13 +155,16 @@ void main() {
     final other = profiles.create();
     settings.setBackground(image);
     profiles.switchTo(me.id);
-    settings.setBackground(const DefaultBackground());
+    // Replaced by a new upload here: kept, as the other profile's.
+    await settings.setBackgroundImage(picked('new.png').path);
     expect(file.existsSync(), isTrue);
     settings.deleteUnusedBackgroundImages();
     expect(file.existsSync(), isTrue);
     profiles.switchTo(other.id);
-    settings.setBackground(const DefaultBackground());
-    expect(file.existsSync(), isFalse);
+    settings.setBackground(null);
+    // Still kept: no image keeps it to pick again.
+    settings.deleteUnusedBackgroundImages();
+    expect(file.existsSync(), isTrue);
   });
 
   test('a photo is copied in, replaced and removed', () async {

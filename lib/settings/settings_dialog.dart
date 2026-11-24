@@ -12,6 +12,7 @@ import 'background.dart';
 import 'settings_repository.dart';
 import '../app_theme.dart';
 import 'color_picker.dart';
+import '../widgets/sliding_toggle.dart';
 
 /// The Settings modal. Changes apply right away.
 Future<void> showSettingsDialog(
@@ -28,7 +29,7 @@ Future<void> showSettingsDialog(
 );
 
 /// The Settings window's height: the same on every tab.
-const settingsDialogHeight = 470.0;
+const settingsDialogHeight = 550.0;
 
 /// The Settings tabs.
 enum _Tab { theme, data, export, mcp }
@@ -77,7 +78,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       backgroundColor: context.colors.surface,
       shape: formShape,
       child: SizedBox(
-        width: 440 + 48,
+        width: 540 + 48,
         height: settingsDialogHeight,
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -121,35 +122,27 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   /// Theme · Data · Export, across the top: styled like the Board/List
   /// switch.
-  Widget _switcher(List<_Tab> tabs) => SegmentedButton<_Tab>(
-    showSelectedIcon: false,
-    style: SegmentedButton.styleFrom(
-      visualDensity: VisualDensity.compact,
-      textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w400),
-      side: BorderSide(color: context.colors.cardBorder),
-      backgroundColor: context.colors.surface,
-      selectedBackgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-    ),
+  Widget _switcher(List<_Tab> tabs) => SlidingToggle<_Tab>(
     segments: [
       for (final t in tabs)
-        ButtonSegment(
+        ToggleSegment(
           value: t,
-          icon: Icon(switch (t) {
+          icon: switch (t) {
             _Tab.theme => Symbols.palette,
             _Tab.data => Symbols.database,
             _Tab.export => Symbols.download,
             _Tab.mcp => Symbols.hub,
-          }, size: 16),
-          label: Text(switch (t) {
+          },
+          label: switch (t) {
             _Tab.theme => 'Theme',
             _Tab.data => 'Data',
             _Tab.export => 'Export',
             _Tab.mcp => 'MCP',
-          }),
+          },
         ),
     ],
-    selected: {_tab},
-    onSelectionChanged: (s) => setState(() => _tab = s.single),
+    selected: _tab,
+    onChanged: (t) => setState(() => _tab = t),
   );
 
   /// Background image, background color and accent.
@@ -269,18 +262,13 @@ class _BackgroundPicker extends StatelessWidget {
               selected: current == null,
               onTap: () => settings.setBackground(null),
             ),
-            _ImageTile(
-              label: 'Default',
-              image: const AssetImage(DefaultBackground.asset),
-              selected: current is DefaultBackground,
-              onTap: () => settings.setBackground(const DefaultBackground()),
-            ),
-            if (current is ImageBackground)
+            // The uploaded image, kept while No image is picked.
+            if (settings.uploadedImage case final upload?)
               _ImageTile(
                 label: 'Your image',
-                image: FileImage(settings.backgroundFile(current.fileName)),
-                selected: true,
-                onTap: () {},
+                image: FileImage(settings.backgroundFile(upload)),
+                selected: current == ImageBackground(upload),
+                onTap: () => settings.setBackground(ImageBackground(upload)),
               ),
             _ChooseImageTile(onTap: _pickImage),
           ],
@@ -554,7 +542,7 @@ class _ChooseImageTile extends StatelessWidget {
           spacing: 4,
           children: [
             Icon(Symbols.add_photo_alternate, size: 20),
-            Text('Choose image…', style: TextStyle(fontSize: 12)),
+            Text('Upload image', style: TextStyle(fontSize: 12)),
           ],
         ),
       ),

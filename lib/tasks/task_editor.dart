@@ -44,7 +44,8 @@ Future<void> showTaskEditor(
   // Clicking outside the panel (or Escape) closes it without saving.
   barrierDismissible: true,
   barrierLabel: 'Close task editor',
-  // No scrim: the panel sits directly on the app.
+  // The barrier only takes the click outside; the dimmed backdrop is
+  // drawn by _EditorTransition, on the form's own clock.
   barrierColor: Colors.transparent,
   transitionDuration: const Duration(milliseconds: 220),
   pageBuilder: (_, _, _) => Align(
@@ -59,18 +60,86 @@ Future<void> showTaskEditor(
       onDelete: onDelete,
     ),
   ),
-  // Slides in from the right edge of the window.
-  transitionBuilder: (_, animation, _, child) => SlideTransition(
-    position: Tween(begin: const Offset(1, 0), end: Offset.zero).animate(
-      CurvedAnimation(
-        parent: animation,
-        curve: Curves.easeOutCubic,
-        reverseCurve: Curves.easeInCubic,
-      ),
-    ),
-    child: child,
-  ),
+  // Fades in while moving a little to the left into place (about 40px);
+  // closing does the reverse. See _EditorTransition.
+  transitionBuilder: (_, animation, _, child) =>
+      _EditorTransition(route: animation, child: child),
 );
+
+/// The form's entrance and exit: faded in over 350ms while moving 60px
+/// left into place, over a dimmed backdrop fading in with it; faded out
+/// moving 40px back (the route's 220ms).
+///
+/// The entrance runs on its own clock, started once the form's first
+/// frame is up: that frame (building the whole form) can take longer than
+/// the animation, which would otherwise be over before anything showed.
+/// Closing follows the route's animation.
+class _EditorTransition extends StatefulWidget {
+  const _EditorTransition({required this.route, required this.child});
+  final Animation<double> route;
+  final Widget child;
+
+  @override
+  State<_EditorTransition> createState() => _EditorTransitionState();
+}
+
+class _EditorTransitionState extends State<_EditorTransition>
+    with SingleTickerProviderStateMixin {
+  late final _entrance = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 350),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _entrance.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _entrance.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: Listenable.merge([_entrance, widget.route]),
+    builder: (context, child) {
+      final closing =
+          widget.route.status == AnimationStatus.reverse ||
+          widget.route.status == AnimationStatus.dismissed;
+      final t = closing
+          ? Curves.easeInCubic.transform(widget.route.value)
+          // Gentler than easeOutCubic, which covers half the way in the
+          // first frame or two: the movement stays visible.
+          : Curves.easeOut.transform(_entrance.value);
+      return Stack(
+        children: [
+          // The dimmed backdrop (like Settings'), fading with the panel.
+          // Clicks go through to the route's barrier, which closes it.
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ColoredBox(
+                color: Colors.black.withValues(alpha: 0.54 * t),
+              ),
+            ),
+          ),
+          Opacity(
+            opacity: t,
+            child: Transform.translate(
+              offset: Offset((1 - t) * (closing ? 40 : 60), 0),
+              child: child,
+            ),
+          ),
+        ],
+      );
+    },
+    child: widget.child,
+  );
+}
 
 /// Placeholder text color for every field in the form (30% white).
 
@@ -356,7 +425,7 @@ class _TaskEditorState extends State<TaskEditor> {
     final known = {for (final l in _knownLabels) l.toLowerCase(): l};
     final have = {for (final l in _labels) l.toLowerCase()};
     final added = [
-      for (final l in input.split(',').map((l) => l.trim()))
+      for (final l in input.split(',').map(clipLabel))
         if (l.isNotEmpty && have.add(l.toLowerCase()))
           known[l.toLowerCase()] ?? l,
     ];
@@ -625,12 +694,12 @@ class _TaskEditorState extends State<TaskEditor> {
     );
   }
 
-  // A full-height panel on the right: no shadow, just a left edge in the
-  // same color as the form fields' outlines.
+  // A full-height panel on the right, over the dimmed backdrop: no
+  // shadow, no edge line.
   Widget _panel() {
     return Material(
       color: context.colors.surface,
-      shape: Border(left: BorderSide(color: context.colors.formBorder)),
+      // No edge line: the dimmed backdrop sets it off from the app.
       child: SizedBox(
         width: taskEditorWidth,
         height: double.infinity,

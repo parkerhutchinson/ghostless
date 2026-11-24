@@ -4,12 +4,11 @@ import 'package:codename/widgets/blur.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  Uint8List image(int w, int h, int Function(int x, int y) red) => Uint8List(
-    w * h * 4,
-  )..setAll(0, [
-      for (var y = 0; y < h; y++)
-        for (var x = 0; x < w; x++) ...[red(x, y), 0, 0, 255],
-    ]);
+  Uint8List image(int w, int h, int Function(int x, int y) red) =>
+      Uint8List(w * h * 4)..setAll(0, [
+        for (var y = 0; y < h; y++)
+          for (var x = 0; x < w; x++) ...[red(x, y), 0, 0, 255],
+      ]);
   int redAt(Uint8List p, int w, int x, int y) => p[(y * w + x) * 4];
 
   test('a flat image stays the same', () {

@@ -1,6 +1,20 @@
+import 'package:characters/characters.dart';
+
 import '../projects/project_repository.dart';
 import 'label_colors.dart';
 import 'task_repository.dart';
+
+/// The most characters a label can have.
+const maxLabelLength = 25;
+
+/// [label] trimmed and cut to [maxLabelLength] characters.
+String clipLabel(String label) {
+  final t = label.trim();
+  final chars = t.characters;
+  return chars.length <= maxLabelLength
+      ? t
+      : chars.take(maxLabelLength).toString().trimRight();
+}
 
 /// What a label edit did, so an open task form can follow along: labels
 /// renamed (old name lowercased → new name) and deleted (lowercased).

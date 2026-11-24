@@ -7,6 +7,7 @@ import '../projects/project_logo.dart';
 import '../app_theme.dart';
 import 'due_date.dart';
 import 'label_colors.dart';
+import 'label_line.dart';
 import 'task.dart';
 import 'task_repository.dart';
 import '../widgets/left_menu_button.dart';
@@ -15,7 +16,7 @@ import '../widgets/truncated_text.dart';
 /// Line height for the text in tags and project labels: a fixed height with
 /// the extra space split evenly above and below, so the label sits in the
 /// middle of the chip (and lines up with its icons).
-const _chipLineHeight = 14 / 11.5;
+const chipLineHeight = 14 / 11.5;
 
 /// A task on the board or in the list. Tapping opens it; the round button
 /// checks it off (it stays in its column: tasks move only by dragging); the
@@ -26,6 +27,7 @@ class TaskCard extends StatefulWidget {
     required this.task,
     required this.repo,
     this.onOpen,
+    this.onDuplicate,
     this.onDelete,
     this.onRemoveFromProject,
     this.multiHomes = const [],
@@ -59,6 +61,9 @@ class TaskCard extends StatefulWidget {
   final VoidCallback? onOpen;
   final VoidCallback? onDelete;
 
+  /// Copies the task (from its ⋯ menu).
+  final VoidCallback? onDuplicate;
+
   /// Checked off on the board shown (it stays in its column).
   final bool completed;
   final VoidCallback? onToggleCompleted;
@@ -89,7 +94,8 @@ class _TaskCardState extends State<TaskCard> {
       color: context.colors.card,
       elevation: lifted ? 12 : 0,
       shadowColor: Colors.black,
-      // Square: task cards have no rounded corners.
+      // Square: task cards have no rounded corners. (Open in the form,
+      // it's outlined in the accent by OpenOutline around it.)
       shape: RoundedRectangleBorder(
         side: BorderSide(color: context.colors.cardBorder),
       ),
@@ -97,6 +103,9 @@ class _TaskCardState extends State<TaskCard> {
       child: InkWell(
         onTap: onOpen,
         mouseCursor: SystemMouseCursors.click,
+        // No ripple or press shade: a click outlines it (see selected).
+        splashFactory: NoSplash.splashFactory,
+        highlightColor: Colors.transparent,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -136,7 +145,11 @@ class _TaskCardState extends State<TaskCard> {
         ),
       ),
     );
-    if (onDelete == null && widget.onRemoveFromProject == null) return card;
+    if (onDelete == null &&
+        widget.onRemoveFromProject == null &&
+        widget.onDuplicate == null) {
+      return card;
+    }
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
@@ -150,6 +163,7 @@ class _TaskCardState extends State<TaskCard> {
               top: 6,
               right: 6,
               child: _CardMenu(
+                onDuplicate: widget.onDuplicate,
                 onDelete: onDelete,
                 onRemoveFromProject: widget.onRemoveFromProject,
                 shared: widget.multiHomes.isNotEmpty,
@@ -269,6 +283,7 @@ class TaskRow extends StatefulWidget {
     super.key,
     required this.task,
     this.onOpen,
+    this.onDuplicate,
     this.onDelete,
     this.onRemoveFromProject,
     this.multiHomes = const [],
@@ -289,6 +304,7 @@ class TaskRow extends StatefulWidget {
 
   final Task task;
   final VoidCallback? onOpen;
+  final VoidCallback? onDuplicate;
   final VoidCallback? onDelete;
   final VoidCallback? onRemoveFromProject;
   final List<Project> multiHomes;
@@ -314,7 +330,9 @@ class _TaskRowState extends State<TaskRow> {
   Widget build(BuildContext context) {
     final TaskRow(:task, :completed) = widget;
     final hasMenu =
-        widget.onDelete != null || widget.onRemoveFromProject != null;
+        widget.onDelete != null ||
+        widget.onRemoveFromProject != null ||
+        widget.onDuplicate != null;
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
@@ -327,12 +345,16 @@ class _TaskRowState extends State<TaskRow> {
         child: InkWell(
           onTap: widget.onOpen,
           mouseCursor: SystemMouseCursors.click,
+          // No ripple or press shade: a click outlines it (drawn by the
+          // list).
+          splashFactory: NoSplash.splashFactory,
+          highlightColor: Colors.transparent,
           child: Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: TaskTable.cellPadding,
             ),
-            // At least [TaskTable.height]; taller when the tags wrap onto
-            // more lines. IntrinsicHeight lets the column lines run the
+            // At least [TaskTable.height]; taller when the projects wrap
+            // onto more lines (labels stay on one). IntrinsicHeight lets the column lines run the
             // row's full height.
             child: ConstrainedBox(
               constraints: const BoxConstraints(minHeight: TaskTable.height),
@@ -409,16 +431,16 @@ class _TaskRowState extends State<TaskRow> {
                     ),
                     Expanded(
                       flex: TaskTable.tagsFlex,
-                      // Tags wrap onto new lines (the row grows to fit).
+                      // One line: as many as fit, then "+N"; hovering
+                      // shows them all.
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Wrap(
-                          spacing: 4,
-                          runSpacing: 4,
-                          children: [
-                            for (final tag in task.tags)
-                              LabelChip(tag, projectId: task.originId),
-                          ],
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: LabelLine(
+                            tags: task.tags,
+                            projectId: task.originId,
+                          ),
                         ),
                       ),
                     ),
@@ -443,6 +465,7 @@ class _TaskRowState extends State<TaskRow> {
                       width: TaskTable.menu,
                       child: hasMenu && (_hover || _menuOpen)
                           ? _CardMenu(
+                              onDuplicate: widget.onDuplicate,
                               onDelete: widget.onDelete,
                               onRemoveFromProject: widget.onRemoveFromProject,
                               shared: widget.multiHomes.isNotEmpty,
@@ -462,16 +485,18 @@ class _TaskRowState extends State<TaskRow> {
   }
 }
 
-/// ⋯ menu button (like a project's in the sidebar), shown on hover, holding the card's actions: Delete in
-/// the task's origin project, Remove from this project where it's
-/// multi-homed.
+/// ⋯ menu button (like a project's in the sidebar), shown on hover,
+/// holding the card's actions: Duplicate; Delete in the task's origin
+/// project, Remove from this project where it's multi-homed.
 class _CardMenu extends StatelessWidget {
   const _CardMenu({
+    required this.onDuplicate,
     required this.onDelete,
     required this.onRemoveFromProject,
     required this.shared,
     required this.onOpenChanged,
   });
+  final VoidCallback? onDuplicate;
   final VoidCallback? onDelete;
   final VoidCallback? onRemoveFromProject;
 
@@ -497,6 +522,18 @@ class _CardMenu extends StatelessWidget {
       },
       constraints: const BoxConstraints(minWidth: 200),
       itemBuilder: (_) => [
+        if (onDuplicate case final duplicate?)
+          PopupMenuItem(
+            value: duplicate,
+            height: 36,
+            child: const Row(
+              spacing: 10,
+              children: [
+                Icon(Symbols.content_copy, size: 18),
+                Text('Duplicate'),
+              ],
+            ),
+          ),
         if (onRemoveFromProject case final remove?)
           PopupMenuItem(
             value: remove,
@@ -726,7 +763,7 @@ class _DueLabel extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11.5,
                 color: color,
-                height: _chipLineHeight,
+                height: chipLineHeight,
                 leadingDistribution: TextLeadingDistribution.even,
               ),
             ),
@@ -762,7 +799,7 @@ class _AttachmentCount extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11.5,
                 color: color,
-                height: _chipLineHeight,
+                height: chipLineHeight,
                 leadingDistribution: TextLeadingDistribution.even,
               ),
             ),
@@ -801,7 +838,7 @@ class _MultiHomeLabel extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11.5,
                 color: context.colors.text,
-                height: _chipLineHeight,
+                height: chipLineHeight,
                 leadingDistribution: TextLeadingDistribution.even,
               ),
             ),
@@ -907,7 +944,7 @@ class LabelChip extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11.5,
-                height: _chipLineHeight,
+                height: chipLineHeight,
                 leadingDistribution: TextLeadingDistribution.even,
                 fontWeight: FontWeight.w400,
                 color: labelText(color),

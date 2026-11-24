@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -5,13 +7,21 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../app_theme.dart';
 import 'mcp_service.dart';
 
-/// The command that adds the server to Claude Code.
-String claudeCodeCommand(McpService mcp) =>
-    'claude mcp add --transport http codename ${mcp.url} '
-    '--header "Authorization: Bearer ${mcp.token}"';
+/// The server's entry in the `mcpServers` JSON that most AI agents read
+/// their MCP servers from: not tied to any one agent.
+String agentCommand(McpService mcp) =>
+    const JsonEncoder.withIndent('  ').convert({
+      'mcpServers': {
+        'codename': {
+          'type': 'http',
+          'url': mcp.url,
+          'headers': {'Authorization': 'Bearer ${mcp.token}'},
+        },
+      },
+    });
 
 /// Settings' MCP tab: turns the app's MCP server on or off, and shows
-/// what an AI assistant needs to connect (address, token, the Claude Code
+/// what an AI assistant needs to connect (address, token, the agent
 /// command).
 class McpSettingsSection extends StatefulWidget {
   const McpSettingsSection({super.key, required this.mcp});
@@ -61,7 +71,7 @@ class _McpSettingsSectionState extends State<McpSettingsSection> {
         spacing: 12,
         children: [
           Text(
-            'Let AI assistants such as Claude read and change your projects '
+            'Let AI agents read and change your projects '
             'and tasks while the app is open, through MCP (Model Context '
             'Protocol). Only apps on this Mac can connect, and only with '
             'the token.',
@@ -124,9 +134,9 @@ class _McpSettingsSectionState extends State<McpSettingsSection> {
               runSpacing: 8,
               children: [
                 outlined(
-                  _copied == 'command' ? 'Copied' : 'Copy Claude Code command',
+                  _copied == 'command' ? 'Copied' : 'Copy agent command',
                   _copied == 'command' ? Symbols.check : Symbols.terminal,
-                  () => _copy('command', claudeCodeCommand(_mcp)),
+                  () => _copy('command', agentCommand(_mcp)),
                 ),
                 outlined('New token', Symbols.refresh, () async {
                   await _mcp.regenerateToken();
@@ -135,8 +145,8 @@ class _McpSettingsSectionState extends State<McpSettingsSection> {
               ],
             ),
             Text(
-              'Paste the command in a terminal to add it to Claude Code. A new '
-              'token disconnects assistants set up with the old one.',
+              'Paste it into your agent\'s MCP settings. A new token '
+              'disconnects agents set up with the old one.',
               style: muted.copyWith(fontSize: 12),
             ),
           ],

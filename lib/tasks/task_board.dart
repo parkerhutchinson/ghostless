@@ -137,10 +137,11 @@ class ColumnDropTarget extends StatelessWidget {
               child: IgnorePointer(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: context.colors.text.withValues(alpha: 0.06),
+                    color: Theme.of(context).colorScheme.primary
+                        .withValues(alpha: 0.08),
                     borderRadius: containerRadius,
                     border: Border.all(
-                      color: context.colors.text.withValues(alpha: 0.5),
+                      color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
                 ),
@@ -379,7 +380,15 @@ class ColumnHeader extends StatefulWidget {
     this.onDelete,
     this.startEditing = false,
     this.noun = 'column',
+    this.collapsed = false,
+    this.onToggleCollapsed,
   });
+
+  /// Its rows are hidden (folded into the heading). List view only.
+  final bool collapsed;
+
+  /// Collapses or expands it, from the ⋯ menu; none on the board.
+  final VoidCallback? onToggleCollapsed;
 
   /// What the user calls it in the menu: a "column" on the board, a
   /// "section" in the list view.
@@ -522,10 +531,12 @@ class _ColumnHeaderState extends State<ColumnHeader> {
             // Same size and padding as the ⋯ next to it.
             iconSize: 17,
             padding: EdgeInsets.zero,
-            style: IconButton.styleFrom(
-              fixedSize: const Size(26, 26),
-              minimumSize: const Size(26, 26),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            style: _headerButtonFill(context).merge(
+              IconButton.styleFrom(
+                fixedSize: const Size(26, 26),
+                minimumSize: const Size(26, 26),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
             ),
             onPressed: widget.onCreate,
             icon: Icon(Symbols.add),
@@ -535,6 +546,8 @@ class _ColumnHeaderState extends State<ColumnHeader> {
             noun: widget.noun,
             onRename: _start,
             onDelete: widget.onDelete,
+            collapsed: widget.collapsed,
+            onToggleCollapsed: widget.onToggleCollapsed,
           ),
         ],
       ),
@@ -542,13 +555,32 @@ class _ColumnHeaderState extends State<ColumnHeader> {
   }
 }
 
-/// A column's ⋯ menu: Rename and Delete (disabled for the only column).
+/// A column heading's + and ⋯: no tile until hovered (or pressed), then
+/// the count's shade beside them, with no tint over it.
+ButtonStyle _headerButtonFill(BuildContext context) => ButtonStyle(
+  backgroundColor: WidgetStateProperty.resolveWith(
+    (states) =>
+        states.contains(WidgetState.hovered) ||
+            states.contains(WidgetState.pressed)
+        ? context.colors.card
+        : Colors.transparent,
+  ),
+  overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+);
+
+/// A column's ⋯ menu: Collapse or Expand (list view sections), Rename,
+/// and Delete (disabled for the only column).
 class _ColumnMenu extends StatelessWidget {
   const _ColumnMenu({
     required this.noun,
     required this.onRename,
     required this.onDelete,
+    this.collapsed = false,
+    this.onToggleCollapsed,
   });
+
+  final bool collapsed;
+  final VoidCallback? onToggleCollapsed;
 
   final String noun;
 
@@ -584,19 +616,15 @@ class _ColumnMenu extends StatelessWidget {
       tooltip: '${noun[0].toUpperCase()}${noun.substring(1)} options',
       iconSize: 17,
       padding: EdgeInsets.zero,
-      // Like the + beside it: no tile until hovered, then solid gray.
-      style: context.colors.menuButtonStyle.copyWith(
-        backgroundColor: WidgetStateProperty.resolveWith(
-          (states) =>
-              states.contains(WidgetState.hovered) ||
-                  states.contains(WidgetState.pressed)
-              ? context.colors.hover
-              : Colors.transparent,
-        ),
-      ),
+      // Like the + beside it: no tile until hovered.
+      style: _headerButtonFill(context).merge(context.colors.menuButtonStyle),
       icon: Icon(Symbols.more_horiz),
       onSelected: (action) => action(),
       itemBuilder: (_) => [
+        if (onToggleCollapsed case final toggle?)
+          collapsed
+              ? item('Expand $noun', Symbols.unfold_more, toggle)
+              : item('Collapse $noun', Symbols.unfold_less, toggle),
         item('Rename', Symbols.edit, onRename),
         item('Delete $noun', null, onDelete, color: Colors.red.shade300),
       ],
@@ -651,7 +679,8 @@ class _DropIndicator extends StatelessWidget {
     height: 3,
     margin: const EdgeInsets.only(bottom: 8),
     decoration: BoxDecoration(
-      color: context.colors.text,
+      // The accent (Settings), like the other highlights.
+      color: Theme.of(context).colorScheme.primary,
       borderRadius: formRadius,
     ),
   );

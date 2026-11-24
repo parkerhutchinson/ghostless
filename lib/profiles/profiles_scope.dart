@@ -78,6 +78,29 @@ class AssigneeAvatar extends StatelessWidget {
   }
 }
 
+/// An empty profile picture: assigned to nobody (or to a profile that's
+/// gone).
+class UnassignedAvatar extends StatelessWidget {
+  const UnassignedAvatar({super.key, this.size = 20});
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: size,
+    // The glyph's circle fills only 20/24 of its box: scaled up so the
+    // circle itself is [size], like the done checkbox.
+    child: OverflowBox(
+      maxWidth: size * 1.2,
+      maxHeight: size * 1.2,
+      child: Icon(
+        Symbols.account_circle,
+        size: size * 1.2,
+        color: context.colors.placeholder,
+      ),
+    ),
+  );
+}
+
 /// The assignee's avatar as a button (a blank profile icon when nobody's
 /// assigned) that opens a menu of every profile to assign the task to.
 /// Without [onChanged] it's just the avatar.
@@ -117,21 +140,7 @@ class AssigneeButton extends StatelessWidget {
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
       icon: current == null
-          // An empty profile picture: assigned to nobody.
-          // The glyph's circle fills only 20/24 of its box: scaled up so
-          // the circle itself is [size], like the done checkbox.
-          ? SizedBox.square(
-              dimension: size,
-              child: OverflowBox(
-                maxWidth: size * 1.2,
-                maxHeight: size * 1.2,
-                child: Icon(
-                  Symbols.account_circle,
-                  size: size * 1.2,
-                  color: context.colors.placeholder,
-                ),
-              ),
-            )
+          ? UnassignedAvatar(size: size)
           : ProfileAvatar(
               profile: current,
               image: scope.imageOf(current),

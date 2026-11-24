@@ -37,6 +37,9 @@ Rules:
 - The list view's table is square (no radius): the header box, each
   group's box and the row hover highlight. The chips inside rows (due
   date, tags, projects) keep 4px.
+- The Activity page is square too, styled like the list view: each
+  day's rows boxed together on the card shade, with no radius anywhere
+  on it (rows, the day count, the time box, the dismiss button).
 
 ### Colors: everything follows the background color
 
@@ -68,6 +71,20 @@ Use Material Symbols (`Symbols.*` from `material_symbols_icons`), never
 `Icons.*`: the theme sets a lighter stroke weight (300) that only the
 Symbols font supports. The one exception is `Icons.circle`, solid dots
 such as the unread marker (Symbols' circle is an outline).
+
+### Fades never cover scrollbars
+
+Wherever a scrolling list fades out (a `ShaderMask`, e.g. `BottomFade`),
+the scrollbar must not fade with it. A scrollable's automatic scrollbar
+is drawn inside it, so it ends up under the mask. Always:
+
+- turn the automatic one off around the scrollable:
+  `ScrollConfiguration.of(context).copyWith(scrollbars: false)`, and
+- put an explicit `Scrollbar(controller: …)` **outside** the
+  `ShaderMask`, sharing the list's `ScrollController`.
+
+Examples: the board columns (`task_board.dart`), the list view
+(`tasks_page.dart`), Settings and the search results.
 
 ## Profiles
 

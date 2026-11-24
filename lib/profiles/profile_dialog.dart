@@ -180,30 +180,26 @@ class _ProfileDialogState extends State<_ProfileDialog> {
     ],
   );
 
-  /// A labeled text field. Enter saves, except in a [multiline] one, where
-  /// it starts a new line.
+  /// A text field with its label above it, like the task form's (not
+  /// inside the box). Enter saves, except in a [multiline] one, where it
+  /// starts a new line.
   Widget _field(
     TextEditingController controller,
     String label, {
     bool autofocus = false,
     bool multiline = false,
-  }) => TextField(
-    controller: controller,
-    autofocus: autofocus,
-    minLines: multiline ? 3 : 1,
-    maxLines: multiline ? 6 : 1,
-    keyboardType: multiline ? TextInputType.multiline : null,
-    style: const TextStyle(fontSize: 13.5),
-    decoration: InputDecoration(
-      isDense: true,
-      labelText: label,
-      labelStyle: TextStyle(color: context.colors.mutedText),
-      alignLabelWithHint: multiline,
-      contentPadding: const EdgeInsets.all(12),
-      enabledBorder: context.colors.fieldBorder,
-      border: context.colors.fieldBorder,
+  }) => _Labeled(
+    label,
+    TextField(
+      controller: controller,
+      autofocus: autofocus,
+      minLines: multiline ? 3 : 1,
+      maxLines: multiline ? 6 : 1,
+      keyboardType: multiline ? TextInputType.multiline : null,
+      style: const TextStyle(fontSize: 13.5),
+      decoration: _fieldDecoration(context),
+      onSubmitted: multiline ? null : (_) => _save(),
     ),
-    onSubmitted: multiline ? null : (_) => _save(),
   );
 
   Widget _otherProfile(Profile p) => Row(
@@ -252,26 +248,21 @@ class _NewProfileDialogState extends State<_NewProfileDialog> {
 
   @override
   Widget build(BuildContext context) {
-    InputDecoration decoration(String label) => InputDecoration(
-      isDense: true,
-      labelText: label,
-      labelStyle: TextStyle(color: context.colors.mutedText),
-      contentPadding: const EdgeInsets.all(12),
-      enabledBorder: context.colors.fieldBorder,
-      border: context.colors.fieldBorder,
-    );
     return AlertDialog(
       backgroundColor: context.colors.surface,
       shape: formShape,
       title: const Text('New profile'),
       content: SizedBox(
         width: 360,
-        child: TextField(
-          controller: _name,
-          autofocus: true,
-          decoration: decoration('Full name'),
-          onChanged: (_) => setState(() {}),
-          onSubmitted: (_) => _create(),
+        child: _Labeled(
+          'Full name',
+          TextField(
+            controller: _name,
+            autofocus: true,
+            decoration: _fieldDecoration(context),
+            onChanged: (_) => setState(() {}),
+            onSubmitted: (_) => _create(),
+          ),
         ),
       ),
       actions: [
@@ -286,6 +277,30 @@ class _NewProfileDialogState extends State<_NewProfileDialog> {
       ],
     );
   }
+}
+
+/// A profile field's box: a plain outlined input, no label inside it (the
+/// label goes above: [_Labeled]).
+InputDecoration _fieldDecoration(BuildContext context) => InputDecoration(
+  isDense: true,
+  contentPadding: const EdgeInsets.all(12),
+  enabledBorder: context.colors.fieldBorder,
+  border: context.colors.fieldBorder,
+);
+
+/// [field] with its [label] above it, as on the task form.
+class _Labeled extends StatelessWidget {
+  const _Labeled(this.label, this.field);
+  final String label;
+  final Widget field;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    mainAxisSize: MainAxisSize.min,
+    spacing: 8,
+    children: [_Label(label), field],
+  );
 }
 
 class _Label extends StatelessWidget {

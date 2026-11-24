@@ -5,6 +5,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../app_theme.dart';
 import 'form_buttons.dart';
 import 'label_colors.dart';
+import 'label_field.dart' show LabelLengthFormatter;
 import 'project_labels.dart';
 
 /// One label as edited in [LabelsSheet], applied only on Save.
@@ -333,6 +334,7 @@ class _LabelRowState extends State<_LabelRow> {
                 textAlignVertical: TextAlignVertical.center,
                 inputFormatters: [
                   FilteringTextInputFormatter.deny(RegExp(r'[\r\n]')),
+                  const LabelLengthFormatter(),
                 ],
                 style: const TextStyle(fontSize: 13),
                 decoration: InputDecoration(

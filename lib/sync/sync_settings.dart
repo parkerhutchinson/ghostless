@@ -8,6 +8,7 @@ import 'app_schema.dart';
 import 'compatibility.dart';
 import 'remote_config.dart';
 import 'sync_service.dart';
+import '../widgets/sliding_toggle.dart';
 
 /// The Sync section of Settings: where the app syncs to (or that it's
 /// local-only), with buttons to connect, sync now, change or disconnect.
@@ -295,19 +296,14 @@ class _ConnectDialogState extends State<_ConnectDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             spacing: 14,
             children: [
-              SegmentedButton<RemoteKind>(
-                showSelectedIcon: false,
-                style: SegmentedButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  side: BorderSide(color: context.colors.cardBorder),
-                ),
+              SlidingToggle<RemoteKind>(
                 segments: [
                   for (final k in RemoteKind.values)
-                    ButtonSegment(value: k, label: Text(k.label)),
+                    ToggleSegment(value: k, label: k.label),
                 ],
-                selected: {_kind},
-                onSelectionChanged: (s) => setState(() {
-                  _kind = s.single;
+                selected: _kind,
+                onChanged: (k) => setState(() {
+                  _kind = k;
                   _report = null;
                 }),
               ),
