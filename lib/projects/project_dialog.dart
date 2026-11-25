@@ -8,14 +8,16 @@ import 'project.dart';
 import 'project_logo.dart';
 import '../app_theme.dart';
 import '../tasks/form_buttons.dart';
+import '../tasks/rich_text/rich_text_editor.dart';
 import '../widgets/selected_text.dart';
 
-/// What the project dialog returns: the name, color and logo (null for
-/// none), or [delete].
+/// What the project dialog returns: the name, color, logo (null for
+/// none) and description (Markdown), or [delete].
 typedef ProjectDialogResult = ({
   String name,
   int colorIndex,
   ProjectLogo? logo,
+  String description,
   bool delete,
 });
 
@@ -57,6 +59,9 @@ class _ProjectDialogState extends State<_ProjectDialog> {
     ..addListener(() => setState(() {}));
   late int _color = widget.project?.colorIndex ?? widget.defaultColorIndex;
   late ProjectLogo? _logo = widget.project?.logo;
+  late final _description = RichTextController.fromMarkdown(
+    widget.project?.description ?? '',
+  );
 
   /// Why the last picked logo was turned down.
   String? _logoError;
@@ -91,6 +96,7 @@ class _ProjectDialogState extends State<_ProjectDialog> {
       name: _name.text.trim(),
       colorIndex: _color,
       logo: _logo,
+      description: _description.toMarkdown().trim(),
       delete: false,
     ));
   }
@@ -98,6 +104,7 @@ class _ProjectDialogState extends State<_ProjectDialog> {
   @override
   void dispose() {
     _name.dispose();
+    _description.dispose();
     super.dispose();
   }
 
@@ -127,7 +134,8 @@ class _ProjectDialogState extends State<_ProjectDialog> {
       backgroundColor: context.colors.surface,
       title: Text(isNew ? 'New project' : 'Edit project'),
       content: SizedBox(
-        width: 360,
+        // Wide enough for the description's toolbar.
+        width: 400,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -215,6 +223,14 @@ class _ProjectDialogState extends State<_ProjectDialog> {
                   ),
               ],
             ),
+            // What the project is about: the task form's editor. Also
+            // edited on the project's dashboard.
+            RichTextEditor(
+              controller: _description,
+              fontSize: 13,
+              minLines: 3,
+              hintText: 'Add description',
+            ),
           ],
         ),
       ),
@@ -230,6 +246,7 @@ class _ProjectDialogState extends State<_ProjectDialog> {
                   name: _name.text.trim(),
                   colorIndex: _color,
                   logo: _logo,
+                  description: _description.toMarkdown().trim(),
                   delete: true,
                 )),
                 child: const Text('Delete project'),

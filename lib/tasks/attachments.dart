@@ -46,7 +46,8 @@ class AttachmentGrid extends StatelessWidget {
   final VoidCallback onAdd;
   final ValueChanged<Attachment> onRemove;
 
-  static const _columns = 3;
+  /// Tiles to a row, across the form (the upload tile is one too).
+  static const _columns = 8;
   static const _gap = 8.0;
 
   void _open(BuildContext context, Attachment a) {
@@ -93,8 +94,8 @@ class AttachmentGrid extends StatelessWidget {
   );
 }
 
-/// The upload tile after the attachments: a dashed outline, the
-/// paperclip and "Upload".
+/// The upload tile after the attachments: a dashed outline and the
+/// paperclip.
 class _UploadArea extends StatelessWidget {
   const _UploadArea({required this.onPressed});
   final VoidCallback onPressed;
@@ -114,14 +115,9 @@ class _UploadArea extends StatelessWidget {
             foregroundColor: context.colors.placeholder,
             overlayColor: context.colors.text,
           ),
-          child: const Column(
-            mainAxisSize: MainAxisSize.min,
-            spacing: 4,
-            children: [
-              Icon(Symbols.attach_file),
-              Text('Upload', style: TextStyle(fontSize: 12)),
-            ],
-          ),
+          // Just the paperclip: the tiles are small (the tooltip says
+          // what it's for).
+          child: const Icon(Symbols.attach_file, size: 18),
         ),
       ),
     ),
@@ -224,8 +220,8 @@ class _AttachmentTileState extends State<_AttachmentTile> {
             // Editing: a ✕ on every tile. Otherwise Download, on hover.
             if (widget.editing)
               Positioned(
-                top: 6,
-                right: 6,
+                top: 3,
+                right: 3,
                 // Red, with dark ✕, like the delete buttons.
                 child: MouseRegion(
                   onEnter: (_) => setState(() => _removeHover = true),
@@ -241,8 +237,8 @@ class _AttachmentTileState extends State<_AttachmentTile> {
               )
             else if (_hover)
               Positioned(
-                top: 6,
-                right: 6,
+                top: 3,
+                right: 3,
                 child: _overlayButton(
                   'Download',
                   Symbols.download,
@@ -270,36 +266,24 @@ class _AttachmentTileState extends State<_AttachmentTile> {
       child: InkWell(
         customBorder: formShape,
         onTap: onTap,
+        // Small, for the small tiles.
         child: Padding(
-          padding: const EdgeInsets.all(4),
-          child: Icon(icon, size: 14, color: iconColor ?? context.colors.text),
+          padding: const EdgeInsets.all(2),
+          child: Icon(icon, size: 12, color: iconColor ?? context.colors.text),
         ),
       ),
     ),
   );
 
-  /// A document's tile: its type's icon and its name.
+  /// A document's tile: its type's icon (its name shows on hover; the
+  /// tiles are too small for it).
   Widget _document(BuildContext context, Attachment a) => ColoredBox(
     color: context.colors.hover,
-    child: Padding(
-      padding: const EdgeInsets.all(10),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        spacing: 6,
-        children: [
-          Icon(
-            a.extension == 'pdf' ? Symbols.picture_as_pdf : Symbols.draft,
-            size: 28,
-            color: context.colors.text,
-          ),
-          Text(
-            a.name,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 11.5, color: context.colors.text),
-          ),
-        ],
+    child: Center(
+      child: Icon(
+        a.extension == 'pdf' ? Symbols.picture_as_pdf : Symbols.draft,
+        size: 20,
+        color: context.colors.text,
       ),
     ),
   );
@@ -425,31 +409,36 @@ class _AttachmentViewerState extends State<_AttachmentViewer> {
               child: Row(
                 spacing: 8,
                 children: [
-                  Flexible(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: context.colors.surface,
-                        borderRadius: formRadius,
-                        border: Border.all(color: context.colors.formBorder),
-                      ),
-                      child: Text(
-                        _many
-                            ? '${image.name}  ·  ${_index + 1} of '
-                                  '${widget.images.length}'
-                            : image.name,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: context.colors.text,
+                  // All the room the buttons don't use, the name at its
+                  // left: the buttons sit right at the edge. (A Spacer
+                  // beside a Flexible got half the room, pulling them in.)
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: context.colors.surface,
+                          borderRadius: formRadius,
+                          border: Border.all(color: context.colors.formBorder),
+                        ),
+                        child: Text(
+                          _many
+                              ? '${image.name}  ·  ${_index + 1} of '
+                                    '${widget.images.length}'
+                              : image.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: context.colors.text,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  const Spacer(),
                   _button(
                     'Download',
                     Symbols.download,

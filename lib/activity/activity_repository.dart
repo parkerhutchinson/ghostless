@@ -2,6 +2,7 @@ import 'package:sync_engine/sync_engine.dart';
 
 import '../data/ids.dart';
 import '../tasks/task.dart';
+import '../comments/comment.dart';
 import 'activity.dart';
 
 /// Records and reads activity: what other people did to tasks assigned to
@@ -47,12 +48,32 @@ class ActivityRepository {
 
   /// Hides all of [recipientId]'s activity ("Clear all"). Returns what was
   /// hidden, as it was, for [restore].
-  List<Activity> dismissAll(String recipientId, {DateTime? now}) => [
-    for (final a in current(recipientId)) ?dismiss(a.id, now: now),
-  ];
+  List<Activity> dismissAll(String recipientId, {DateTime? now}) =>
+      dismissMany([for (final a in current(recipientId)) a.id], now: now);
+
+  /// Hides the items [ids] (a day's Clear) in one write, so a long list
+  /// clears at once. Returns what was hidden, as it was, for [restore].
+  List<Activity> dismissMany(Iterable<String> ids, {DateTime? now}) {
+    final at = now ?? DateTime.now().toUtc();
+    final hidden = <Activity>[];
+    final records = <String, Map<String, Object?>>{};
+    for (final id in ids) {
+      final record = _store.get(collection, id);
+      final a = record == null ? null : Activity.fromJson(id, record);
+      if (a == null || a.isDismissed) continue;
+      hidden.add(a);
+      // Dismissing also counts as seeing it.
+      records[id] = a
+          .copyWith(dismissedAt: at, readAt: a.readAt ?? at)
+          .toJson();
+    }
+    _store.putAll(collection, records);
+    return hidden;
+  }
 
   /// Puts back what [dismiss] or [dismissAll] hid (Undo).
-  void restore(Iterable<Activity> items) => items.forEach(_save);
+  void restore(Iterable<Activity> items) =>
+      _store.putAll(collection, {for (final a in items) a.id: a.toJson()});
 
   /// Records what a task change means for its assignees: a new assignee
   /// hears they were assigned, a previous one that they were unassigned,
@@ -117,6 +138,32 @@ class ActivityRepository {
                 for (final c in TaskChange.values)
                   if (last.changes.contains(c) || changes.contains(c)) c,
               ],
+      ),
+    );
+  }
+
+  /// Longest preview of a comment kept in its activity.
+  static const excerptLength = 140;
+
+  /// Tells [task]'s assignee about [comment] on it, unless they wrote it.
+  void recordComment(Task? task, Comment comment) {
+    final recipient = task?.assigneeId;
+    if (task == null || recipient == null || recipient == comment.authorId) {
+      return;
+    }
+    final text = comment.plainText;
+    _save(
+      Activity(
+        id: newId(),
+        recipientId: recipient,
+        actorId: comment.authorId,
+        taskId: task.id,
+        taskTitle: task.title,
+        kind: ActivityKind.commented,
+        excerpt: text.length <= excerptLength
+            ? text
+            : '${text.substring(0, excerptLength).trimRight()}…',
+        createdAt: comment.createdAt,
       ),
     );
   }

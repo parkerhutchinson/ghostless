@@ -41,6 +41,16 @@ Rules:
   day's rows boxed together on the card shade, with no radius anywhere
   on it (rows, the day count, the time box, the dismiss button).
 
+- The project dashboard (`lib/projects/project_dashboard.dart`, the
+  header toggle's third view) is square too: its tiles sit on the card
+  shade with no radius, packed edge to edge in each section (no gaps,
+  one shared border line between neighbours), right under the heading. Its section headings look
+  exactly like board column headings (frosted, 14/w600
+  title, count chip, 26px button). The description is read only there;
+  it's written in the project dialog. Its numbers come from
+  `projectStats` (`project_stats.dart`, unit tested), never worked out
+  in widgets.
+
 ### Colors: everything follows the background color
 
 Surfaces, borders and hover shades are never hard-coded. They come from
@@ -82,6 +92,17 @@ Use Material Symbols (`Symbols.*` from `material_symbols_icons`), never
 Symbols font supports. The one exception is `Icons.circle`, solid dots
 such as the unread marker (Symbols' circle is an outline).
 
+### Every page's bottom fades out
+
+Every view or page that scrolls down to the bottom of the window fades
+out at the bottom (`BottomFade`, in `lib/widgets/bottom_fade.dart`),
+like the board columns, the list view, Activity and the dashboard. This
+applies to every new view, without being asked. For a plain scrolling
+page, use `BottomFadeScrollView`, which also keeps the scrollbar out of
+the fade (see below). Leave room at the end (`bottomFadeHeight`, or
+`fabClearance` where the New task button is) so the last content can
+scroll clear of the fade.
+
 ### Fades never cover scrollbars
 
 Wherever a scrolling list fades out (a `ShaderMask`, e.g. `BottomFade`),
@@ -94,7 +115,8 @@ is drawn inside it, so it ends up under the mask. Always:
   `ShaderMask`, sharing the list's `ScrollController`.
 
 Examples: the board columns (`task_board.dart`), the list view
-(`tasks_page.dart`), Settings and the search results.
+(`tasks_page.dart`), Settings, the search results and the dashboard
+(through `BottomFadeScrollView`).
 
 ## Profiles
 
@@ -118,6 +140,23 @@ personal project. Which profile is using this Mac is kept locally
   profiles up through `ProfilesScope.maybeOf(context)`, which sits above
   the navigator so dialogs see it; `AssigneeAvatar` draws the avatar.
 
+## Comments
+
+Tasks have comments (`lib/comments/`, collection `comments`, synced),
+kept apart from the task record so people commenting at once don't
+overwrite each other. They're posted straight away, not with the task
+form's Save.
+
+- A comment's body is Markdown with paragraphs, **bold** and links only:
+  the editor offers just those (`RichTextEditor(tools: commentTools)`),
+  and `CommentRepository.add` strips anything else (`commentMarkdown`).
+- Each comment tells the task's assignee (unless they wrote it): an
+  `ActivityKind.commented` activity with a short `excerpt`.
+- The task form finds the store through `CommentsScope` (above the
+  navigator, like `ProfilesScope`); without one it has no comments.
+- Rich text shown read only (comments, a project's description) uses
+  `RichTextView`: drawn like the editor, links open on click.
+
 ## MCP server
 
 The app can run an MCP server for AI assistants (`lib/mcp/`), switched on
@@ -134,6 +173,12 @@ token shown in Settings. The switch, port and token are kept on this Mac
   returned to the assistant as `isError`, not a protocol error.
 - When a task or project gains a field worth reading or setting, add it
   to the tools' JSON and schemas.
+- `get_task` lists a task's comments; `add_comment` adds one as the
+  current profile.
+- Files (card images, attachments) come in as base64 `data`, a `url`
+  or a `path` (`lib/mcp/mcp_files.dart`), checked by their first bytes,
+  not their names. The app is sandboxed, so a path usually can't be read:
+  agents should send data or a url.
 
 ## Before shipping: compliance reminder
 

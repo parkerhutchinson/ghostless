@@ -18,6 +18,8 @@ import 'tasks/label_colors.dart';
 import 'settings/settings_repository.dart';
 import 'tasks/task_repository.dart';
 import 'traffic_lights.dart';
+import 'comments/comment_repository.dart';
+import 'comments/comments_scope.dart';
 
 /// Shared by the window, the title bar area and the app body so they match.
 const appBackground = surfaceColor;
@@ -76,6 +78,12 @@ Future<void> main() async {
     onChange: activity.recordTaskChange,
   );
 
+  // Comments on tasks; each one tells the task's assignee (Activity).
+  final comments = CommentRepository(
+    data.store,
+    onAdded: (c) => activity.recordComment(tasks.get(c.taskId), c),
+  );
+
   // Due-date reminders for whoever is using this Mac: now, then every
   // minute.
   void remind() {
@@ -90,7 +98,12 @@ Future<void> main() async {
   // The MCP server for AI assistants, if it was left on in Settings.
   final mcp = McpService(
     data.store,
-    McpTools(tasks: tasks, projects: projects, profiles: profiles),
+    McpTools(
+      tasks: tasks,
+      projects: projects,
+      profiles: profiles,
+      comments: comments,
+    ),
   );
   unawaited(mcp.restore());
 
@@ -102,6 +115,7 @@ Future<void> main() async {
       projects: projects,
       profiles: profiles,
       activity: activity,
+      comments: comments,
       mcp: mcp,
     ),
   );
@@ -116,8 +130,11 @@ class MainApp extends StatelessWidget {
     required this.projects,
     required this.profiles,
     required this.activity,
+    required this.comments,
     this.mcp,
   });
+
+  final CommentRepository comments;
 
   final McpService? mcp;
   final ProfileRepository profiles;
@@ -177,7 +194,11 @@ class MainApp extends StatelessWidget {
               image: image,
               child: ProfilesScope.watching(
                 profiles,
-                child: LabelColors.watching(projects, child: child!),
+                child: CommentsScope.watching(
+                  comments,
+                  me: () => profiles.current?.id,
+                  child: LabelColors.watching(projects, child: child!),
+                ),
               ),
             ),
           );

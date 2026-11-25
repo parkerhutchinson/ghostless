@@ -64,6 +64,14 @@ class _ActivityPageState extends State<ActivityPage> {
   /// Unread when shown here: they keep their dot while the page is open.
   final _fresh = <String>{};
 
+  /// Days being cleared: their group is closing (see [_Collapse]). Their
+  /// items are written as dismissed once it has closed.
+  final _closingDays = <String, List<String>>{};
+
+  /// Items cleared and gone from the list, whose write may not have come
+  /// back through the stream yet: hidden meanwhile.
+  final _hidden = <String>{};
+
   @override
   void initState() {
     super.initState();
@@ -95,6 +103,9 @@ class _ActivityPageState extends State<ActivityPage> {
 
   @override
   void dispose() {
+    // Leaving mid-clear: still clear what was asked.
+    final pending = [for (final ids in _closingDays.values) ...ids];
+    if (pending.isNotEmpty) widget.activity.dismissMany(pending);
     _markRead.cancel();
     _scroll.dispose();
     super.dispose();
@@ -123,13 +134,32 @@ class _ActivityPageState extends State<ActivityPage> {
   // Notifications, not work: dismissing one (or all) needs no undo.
   void _dismiss(Activity a) => widget.activity.dismiss(a.id);
 
-  void _clearAll() => widget.activity.dismissAll(widget.profileId);
-
-  /// Dismisses one day's [items].
-  void _clearDay(Iterable<Activity> items) {
+  /// Clears every day shown: they all close at once.
+  void _clearAll(List<Activity> items) {
+    final now = DateTime.now();
+    final byDay = <String, List<Activity>>{};
     for (final a in items) {
-      _dismiss(a);
+      (byDay[_dayLabel(a.createdAt.toLocal(), now)] ??= []).add(a);
     }
+    byDay.forEach(_clearDay);
+  }
+
+  /// Clears a day: it starts closing straight away (the click answers at
+  /// once); its items are dismissed when it has closed ([_dayClosed]).
+  void _clearDay(String day, List<Activity> items) {
+    if (_closingDays.containsKey(day)) return;
+    setState(() => _closingDays[day] = [for (final a in items) a.id]);
+  }
+
+  /// A cleared day has closed: it leaves the list now, and its items are
+  /// written as dismissed after this frame, in one go.
+  void _dayClosed(String day) {
+    final ids = _closingDays.remove(day);
+    if (ids == null) return;
+    setState(() => _hidden.addAll(ids));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.activity.dismissMany(ids);
+    });
   }
 
   @override
@@ -150,9 +180,9 @@ class _ActivityPageState extends State<ActivityPage> {
                     style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
                   ),
                 ),
-                if (snap.requireData.isNotEmpty)
+                if (snap.requireData.any((a) => !_hidden.contains(a.id)))
                   OutlinedButton.icon(
-                    onPressed: _clearAll,
+                    onPressed: () => _clearAll(snap.requireData),
                     style: OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                       foregroundColor: context.colors.text,
@@ -182,47 +212,57 @@ class _ActivityPageState extends State<ActivityPage> {
 
   Widget _list(
     BuildContext context,
-    List<Activity> items,
+    List<Activity> all,
     Map<String, Task> tasks,
   ) {
+    // Once the stream no longer has a hidden item (its dismissal has come
+    // through), it needn't be remembered.
+    _hidden.retainAll({for (final a in all) a.id});
+    final items = [
+      for (final a in all)
+        if (!_hidden.contains(a.id)) a,
+    ];
     if (items.isEmpty) return const _Empty();
     final now = DateTime.now();
-    final children = <Widget>[];
-    String? day;
-    // Each day's items, for the headings' counts and Clear.
+    // Each day's items, newest day first, for its group.
     final byDay = <String, List<Activity>>{};
     for (final a in items) {
       (byDay[_dayLabel(a.createdAt.toLocal(), now)] ??= []).add(a);
     }
-    for (final (i, a) in items.indexed) {
-      final label = _dayLabel(a.createdAt.toLocal(), now);
-      final last =
-          i == items.length - 1 ||
-          _dayLabel(items[i + 1].createdAt.toLocal(), now) != label;
-      if (label != day) {
-        day = label;
-        children.add(
-          _DayHeading(
-            label,
-            count: byDay[label]!.length,
-            first: children.isEmpty,
-            onClear: () => _clearDay(byDay[label]!),
+    final children = <Widget>[
+      for (final (i, MapEntry(key: label, value: dayItems))
+          in byDay.entries.indexed)
+        // A day's heading and rows together, so Clear closes them as one.
+        _Collapse(
+          key: ValueKey(label),
+          closing: _closingDays.containsKey(label),
+          onClosed: () => _dayClosed(label),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _DayHeading(
+                label,
+                count: dayItems.length,
+                first: i == 0,
+                onClear: () => _clearDay(label, dayItems),
+              ),
+              for (final (j, a) in dayItems.indexed)
+                _ActivityRow(
+                  activity: a,
+                  task: tasks[a.taskId],
+                  fresh: _fresh.contains(a.id),
+                  projects: widget.projects,
+                  onOpen: switch (tasks[a.taskId]) {
+                    final task? => () => _open(task),
+                    null => null,
+                  },
+                  onDismiss: () => _dismiss(a),
+                  last: j == dayItems.length - 1,
+                ),
+            ],
           ),
-        );
-      }
-      final task = tasks[a.taskId];
-      children.add(
-        _ActivityRow(
-          activity: a,
-          task: task,
-          fresh: _fresh.contains(a.id),
-          projects: widget.projects,
-          onOpen: task == null ? null : () => _open(task),
-          onDismiss: () => _dismiss(a),
-          last: last,
         ),
-      );
-    }
+    ];
     // Fades out at the window's bottom while there's more below, like the
     // board and list. The scrollbar outside the fade (the list's own off),
     // so it doesn't fade too.
@@ -254,6 +294,68 @@ class _ActivityPageState extends State<ActivityPage> {
       ],
     );
   }
+}
+
+/// Shows [child] until [closing]: then its height shrinks to nothing (and
+/// it fades), and [onClosed] is called.
+class _Collapse extends StatefulWidget {
+  const _Collapse({
+    super.key,
+    required this.closing,
+    required this.onClosed,
+    required this.child,
+  });
+  final bool closing;
+  final VoidCallback onClosed;
+  final Widget child;
+
+  @override
+  State<_Collapse> createState() => _CollapseState();
+}
+
+class _CollapseState extends State<_Collapse>
+    with SingleTickerProviderStateMixin {
+  /// 1 open, 0 closed.
+  late final _open = AnimationController(
+    vsync: this,
+    value: 1,
+    duration: const Duration(milliseconds: 320),
+  );
+  late final _size = CurvedAnimation(
+    parent: _open,
+    curve: Curves.easeInOutCubic,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.closing) _close();
+  }
+
+  @override
+  void didUpdateWidget(_Collapse old) {
+    super.didUpdateWidget(old);
+    if (widget.closing && !old.closing) _close();
+  }
+
+  Future<void> _close() async {
+    await _open.animateTo(0).orCancel.catchError((_) {});
+    if (mounted) widget.onClosed();
+  }
+
+  @override
+  void dispose() {
+    _size.dispose();
+    _open.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SizeTransition(
+    sizeFactor: _size,
+    alignment: Alignment.topCenter,
+    child: FadeTransition(opacity: _open, child: widget.child),
+  );
 }
 
 /// "Today", "Yesterday", or the date ("Nov 17, 2026").
@@ -427,6 +529,7 @@ class _ActivityRowState extends State<_ActivityRow> {
             ActivityKind.assigned => ' assigned you ',
             ActivityKind.unassigned => ' unassigned you from ',
             ActivityKind.deleted => ' deleted ',
+            ActivityKind.commented => ' commented on ',
             _ => ' updated ',
           },
         ),
@@ -437,6 +540,9 @@ class _ActivityRowState extends State<_ActivityRow> {
     final details = [
       if (activity.kind == ActivityKind.updated)
         describeChanges(activity.changes),
+      if (activity.kind == ActivityKind.commented &&
+          (activity.excerpt ?? '').isNotEmpty)
+        '“${activity.excerpt}”',
       if (activity.kind == ActivityKind.overdue && due != null)
         'Was due ${formatDate(due)}$dueTime',
       if (task == null && activity.kind != ActivityKind.deleted)
@@ -517,6 +623,9 @@ class _ActivityRowState extends State<_ActivityRow> {
                           if (d.isNotEmpty)
                             Text(
                               d,
+                              // A comment's preview: two lines at most.
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(fontSize: 12.5, color: muted),
                             ),
                         if (project != null)
@@ -625,8 +734,16 @@ class _Empty extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(24),
+    child: Container(
+      margin: const EdgeInsets.all(24),
+      constraints: const BoxConstraints(maxWidth: 420),
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+      // On the card shade, like the dashboard's tiles.
+      decoration: BoxDecoration(
+        color: context.colors.card,
+        borderRadius: formRadius,
+        border: Border.all(color: context.colors.cardBorder),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         spacing: 10,

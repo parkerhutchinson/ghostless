@@ -7,7 +7,6 @@ import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../data/ids.dart';
-import '../profiles/profile_avatar.dart';
 import '../profiles/profiles_scope.dart';
 import '../projects/project.dart';
 import '../projects/project_repository.dart';
@@ -18,6 +17,9 @@ import 'label_colors.dart';
 import 'label_field.dart';
 import 'labels_sheet.dart';
 import 'project_labels.dart';
+import '../comments/comments_scope.dart';
+import '../comments/task_comments.dart';
+import 'assignee_field.dart';
 import 'attachments.dart';
 import 'task.dart';
 import 'task_card.dart';
@@ -829,6 +831,14 @@ class _TaskEditorState extends State<TaskEditor> {
                             // The same size as the section labels.
                             fontSize: _descriptionFontSize,
                             hintText: 'Add description',
+                            // Roomier above and below than the usual 12:
+                            // 18 on the Mac, whose compact density takes 4
+                            // off these (and adds 4 to the sides, so they
+                            // stay 16).
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 22,
+                            ),
                           ),
                           _section('Subtasks', _subtaskEditor()),
                           _section(
@@ -848,6 +858,27 @@ class _TaskEditorState extends State<TaskEditor> {
                             ),
                             action: _attachmentsButton(),
                           ),
+                          if (CommentsScope.maybeOf(context) != null)
+                            // Set apart from the task's own fields above by
+                            // a line across the whole form (like the
+                            // footer's), with room either side.
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                // With the form's gap before it: 24 above.
+                                const SizedBox(height: _gap / 2),
+                                const _FullWidthLine(sidePadding: 24),
+                                const SizedBox(height: 24),
+                                _section(
+                                  'Comments',
+                                  TaskComments(
+                                    // A new task gets comments once created.
+                                    taskId: _task?.id,
+                                    fontSize: _descriptionFontSize,
+                                  ),
+                                ),
+                              ],
+                            ),
                         ],
                       ),
                     ),
@@ -1209,71 +1240,18 @@ class _TaskEditorState extends State<TaskEditor> {
     ),
   );
 
-  /// Who it's assigned to: Unassigned, or any profile (avatar and name).
-  /// Styled like the Column picker. Locked (grayed out) on a personal
-  /// task: it's always its owner's.
+  /// Who it's assigned to: a search field (see [AssigneeField]), as wide
+  /// as the Column picker. Locked (grayed out) on a personal task: it's
+  /// always its owner's.
   Widget _assigneePicker(ProfilesScope scope) {
     final locked = _personalOwner != null;
-    final style = TextStyle(
-      fontSize: _chipFontSize,
-      color: context.colors.text,
-    );
-    // A deleted profile shows as Unassigned until another is picked.
-    final current = scope.find(_assignee)?.id;
-    final picker = SizedBox(
+    final picker = AssigneeField(
+      // A deleted profile shows as Unassigned until another is picked.
+      assigneeId: scope.find(_assignee)?.id,
       width: _pickerWidth,
-      child: DropdownButtonFormField<String?>(
-        // Rebuilt when the profiles change, so the selection stays valid.
-        key: ValueKey(current),
-        initialValue: current,
-        isDense: true,
-        isExpanded: true,
-        borderRadius: formRadius,
-        dropdownColor: context.colors.surface,
-        style: style,
-        icon: Icon(Symbols.expand_more, size: 16),
-        iconDisabledColor: context.colors.placeholder,
-        decoration: InputDecoration(
-          isDense: true,
-          contentPadding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-          enabledBorder: context.colors.fieldBorder,
-          disabledBorder: context.colors.fieldBorder,
-          border: context.colors.fieldBorder,
-        ),
-        items: [
-          DropdownMenuItem<String?>(
-            value: null,
-            child: Row(
-              spacing: 8,
-              children: [
-                Icon(
-                  Symbols.person_off,
-                  size: 16,
-                  color: context.colors.mutedText,
-                ),
-                Text(
-                  'Unassigned',
-                  style: style.copyWith(color: context.colors.mutedText),
-                ),
-              ],
-            ),
-          ),
-          for (final p in scope.profiles)
-            DropdownMenuItem<String?>(
-              value: p.id,
-              child: Row(
-                spacing: 8,
-                children: [
-                  ProfileAvatar(profile: p, image: scope.imageOf(p), size: 18),
-                  Flexible(
-                    child: Text(p.displayName, overflow: TextOverflow.ellipsis),
-                  ),
-                ],
-              ),
-            ),
-        ],
-        onChanged: locked ? null : (id) => setState(() => _assigneeId = id),
-      ),
+      fontSize: _chipFontSize,
+      enabled: !locked,
+      onChanged: (id) => setState(() => _assigneeId = id),
     );
     if (!locked) return picker;
     return Tooltip(
@@ -1543,4 +1521,26 @@ class _TaskEditorState extends State<TaskEditor> {
       ],
     );
   }
+}
+
+/// A line across the whole form, out past its content's [sidePadding] on
+/// both sides to the panel's edges, in the footer line's color.
+class _FullWidthLine extends StatelessWidget {
+  const _FullWidthLine({required this.sidePadding});
+  final double sidePadding;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final width = constraints.maxWidth + sidePadding * 2;
+      return SizedBox(
+        height: 1,
+        child: OverflowBox(
+          minWidth: width,
+          maxWidth: width,
+          child: ColoredBox(color: context.colors.formBorder),
+        ),
+      );
+    },
+  );
 }

@@ -89,6 +89,9 @@ class ProjectSidebar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Activity, the personal project and the Projects heading stay
+          // put; only the projects below them scroll.
+          _pinned(context),
           Expanded(child: _projectList(context)),
           // Settings, pinned to the bottom below a line.
           Container(
@@ -133,59 +136,73 @@ class ProjectSidebar extends StatelessWidget {
     );
   }
 
-  Widget _projectList(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(8, titleBarHeight + 8, 8, 8),
-      children: [
-        // What others did to your tasks, at the top.
-        _SidebarItem(
-          leading: Icon(Symbols.notifications, size: 16),
-          label: 'Activity',
-          count: unreadActivity,
-          countIsBadge: true,
-          selected: activitySelected,
-          onTap: onOpenActivity,
-        ),
-        // The profile's own project, above the shared ones. Nothing to
-        // edit: it can't be renamed, recolored or deleted.
-        if (personal case final p?) ...[
+  /// Above the scrolling projects: Activity, the personal project and
+  /// the Projects heading.
+  Widget _pinned(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, titleBarHeight + 8, 8, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // What others did to your tasks, at the top.
           _SidebarItem(
-            key: ValueKey(p.id),
-            leading: Icon(Symbols.person, size: 16),
-            label: p.name,
-            count: _taskCount(p.id),
-            selected: !activitySelected && selectedId == p.id,
-            onTap: () => onSelect(p.id),
-            acceptsTask: (t) => !t.isIn(p.id),
-            onDropTask: (t) => onDropTask(t, p.id),
+            leading: Icon(Symbols.notifications, size: 16),
+            label: 'Activity',
+            count: unreadActivity,
+            countIsBadge: true,
+            selected: activitySelected,
+            onTap: onOpenActivity,
           ),
-          const SizedBox(height: 12),
-        ],
-        Padding(
-          padding: const EdgeInsets.fromLTRB(10, 2, 2, 4),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'PROJECTS',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.8,
-                    color: context.colors.text,
+          // The profile's own project, above the shared ones. Nothing to
+          // edit: it can't be renamed, recolored or deleted.
+          if (personal case final p?) ...[
+            _SidebarItem(
+              key: ValueKey(p.id),
+              leading: Icon(Symbols.person, size: 16),
+              label: p.name,
+              count: _taskCount(p.id),
+              selected: !activitySelected && selectedId == p.id,
+              onTap: () => onSelect(p.id),
+              acceptsTask: (t) => !t.isIn(p.id),
+              onDropTask: (t) => onDropTask(t, p.id),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 2, 2, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'PROJECTS',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                      color: context.colors.text,
+                    ),
                   ),
                 ),
-              ),
-              IconButton(
-                tooltip: 'New project',
-                iconSize: 17,
-                visualDensity: VisualDensity.compact,
-                onPressed: onCreate,
-                icon: Icon(Symbols.add),
-              ),
-            ],
+                IconButton(
+                  tooltip: 'New project',
+                  iconSize: 17,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onCreate,
+                  icon: Icon(Symbols.add),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
+      ),
+    );
+  }
+
+  /// The shared projects, scrolling on their own.
+  Widget _projectList(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+      children: [
         for (final p in projects)
           _SidebarItem(
             key: ValueKey(p.id),

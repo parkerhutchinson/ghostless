@@ -3,6 +3,9 @@ import 'package:characters/characters.dart';
 import 'dart:async';
 
 import '../data/ids.dart';
+import '../comments/comment.dart';
+import '../comments/comment_repository.dart';
+import '../profiles/profile.dart';
 import '../profiles/profile_repository.dart';
 import '../projects/project.dart';
 import '../projects/project_repository.dart';
@@ -10,6 +13,7 @@ import '../tasks/due_date.dart';
 import '../tasks/project_labels.dart' show maxLabelLength;
 import '../tasks/task.dart';
 import '../tasks/task_repository.dart';
+import 'mcp_files.dart';
 import 'task_change_feed.dart';
 
 /// Something a tool call got wrong (an unknown task, a bad date): told to
@@ -70,7 +74,11 @@ final class McpTools {
     required this.tasks,
     required this.projects,
     required this.profiles,
+    this.comments,
   });
+
+  /// Task comments; without it (tests), tasks have none to read or add.
+  final CommentRepository? comments;
 
   final TaskRepository tasks;
   final ProjectRepository projects;
@@ -89,8 +97,8 @@ final class McpTools {
       title: 'List projects',
       description:
           'Lists the projects (boards), in sidebar order: id, name, whether '
-          'it is the personal project, its columns (left to right) and how '
-          'many tasks it has.',
+          'it is the personal project, its description (Markdown), its '
+          'columns (left to right) and how many tasks it has.',
       inputSchema: _object({}),
       readOnly: true,
       run: (_) => [for (final p in _projects) _projectJson(p)],
@@ -105,6 +113,10 @@ final class McpTools {
       inputSchema: _object(
         {
           'name': _string('The project\'s name.'),
+          'description': _string(
+            'What the project is about, in Markdown ($_markdownSubset). '
+            'Shown on its dashboard.',
+          ),
           'columns': _strings('Its columns\' names, left to right.'),
         },
         required: ['name'],
@@ -116,7 +128,10 @@ final class McpTools {
           throw McpToolError('There\'s already a project "$name".');
         }
         final columnNames = _stringList(args['columns']);
-        var project = projects.create(name);
+        var project = projects.create(
+          name,
+          description: _optionalString(args, 'description')?.trim() ?? '',
+        );
         if (columnNames.isNotEmpty) {
           project = project.copyWith(
             columns: [for (final c in columnNames) TaskColumn(newId(), c)],
@@ -124,6 +139,48 @@ final class McpTools {
           projects.save(project);
         }
         return _projectJson(project);
+      },
+    ),
+    McpTool(
+      name: 'update_project',
+      title: 'Update project',
+      description:
+          'Renames a shared project or changes its description. Only the '
+          'fields given change. The personal project can\'t be edited. '
+          'Returns it.',
+      inputSchema: _object(
+        {
+          'project': _project,
+          'name': _string('New name.'),
+          'description': _string(
+            'New description, in Markdown ($_markdownSubset). An empty '
+            'string clears it.',
+          ),
+        },
+        required: ['project'],
+      ),
+      run: (args) {
+        final project = _projectArg(args);
+        if (project.isPersonal) {
+          throw const McpToolError('The personal project can\'t be edited.');
+        }
+        final name = _optionalString(args, 'name')?.trim();
+        if (name != null) {
+          if (name.isEmpty) throw const McpToolError('name can\'t be empty.');
+          if (_projects.any(
+            (p) =>
+                p.id != project.id &&
+                p.name.toLowerCase() == name.toLowerCase(),
+          )) {
+            throw McpToolError('There\'s already a project "$name".');
+          }
+        }
+        final updated = project.copyWith(
+          name: name,
+          description: _optionalString(args, 'description')?.trim(),
+        );
+        projects.save(updated);
+        return _projectJson(updated);
       },
     ),
     McpTool(
@@ -136,10 +193,40 @@ final class McpTools {
       readOnly: true,
       run: (_) {
         final me = profiles.current?.id;
-        return [
-          for (final p in profiles.all())
-            {'id': p.id, 'name': p.displayName, 'isMe': p.id == me},
-        ];
+        return [for (final p in profiles.all()) _personJson(p, me: me)];
+      },
+    ),
+    McpTool(
+      name: 'create_person',
+      title: 'Create person',
+      description:
+          'Adds a person (profile) tasks can be assigned to, with their own '
+          'personal project. Doesn\'t switch the app to them. Returns them.',
+      inputSchema: _object(
+        {
+          'name': _string('Their full name.'),
+          'department': _string('Their department.'),
+          'jobTitle': _string('Their job title.'),
+          'description': _string('A short line about them.'),
+        },
+        required: ['name'],
+      ),
+      run: (args) {
+        final name = _requiredString(args, 'name').trim();
+        if (name.isEmpty) throw const McpToolError('name is required.');
+        if (profiles.all().any(
+          (p) => p.fullName.toLowerCase() == name.toLowerCase(),
+        )) {
+          throw McpToolError('There\'s already a person named "$name".');
+        }
+        var person = profiles.create(name: name, switchTo: false);
+        person = person.copyWith(
+          department: _optionalString(args, 'department')?.trim(),
+          jobTitle: _optionalString(args, 'jobTitle')?.trim(),
+          description: _optionalString(args, 'description')?.trim(),
+        );
+        profiles.save(person);
+        return _personJson(person, me: profiles.current?.id);
       },
     ),
     McpTool(
@@ -222,7 +309,8 @@ final class McpTools {
       description:
           'Everything about one task: title, description (Markdown), column '
           'and completion on each of its projects, assignee, due date, '
-          'labels, subtasks (with ids) and attachment names.',
+          'labels, subtasks (with ids), attachment names and comments '
+          '(oldest first).',
       inputSchema: _object({'taskId': _taskId}, required: ['taskId']),
       readOnly: true,
       run: (args) => _taskDetail(_task(args)),
@@ -248,40 +336,75 @@ final class McpTools {
             'Labels to put on it (each at most $maxLabelLength characters).',
           ),
           'subtasks': _strings('Subtask titles, in order.'),
+          'image': mcpFileSchema('The card image, shown on the card.'),
+          'attachments': {
+            'type': 'array',
+            'description': 'Files to attach (images or PDFs), in order.',
+            'items': mcpFileSchema(
+              'An image or PDF to attach.',
+              allowPdf: true,
+            ),
+          },
         },
         required: ['project', 'title'],
       ),
       run: (args) {
+        // Everything checked before any file is read or stored.
         final project = _projectArg(args);
         final title = _requiredString(args, 'title').trim();
         if (title.isEmpty) throw const McpToolError('The title is empty.');
         final dueDate = _day(args['dueDate']);
+        final dueTime = dueDate == null ? null : _time(args['dueTime']);
         final labels = _labels(args['labels']);
-        final created = tasks.create(
-          title: title,
-          description: (args['description'] as String? ?? '').trim(),
-          status: switch (args['column']) {
-            final String c => _column(project, c).id,
-            _ => project.columns.first.id,
-          },
-          tags: labels,
-          originId: project.id,
-          dueDate: dueDate,
-          dueTime: dueDate == null ? null : _time(args['dueTime']),
-          subtasks: [
-            for (final s in _stringList(args['subtasks']))
-              Subtask(id: newId(), title: s),
-          ],
-          // On a personal project, always its owner.
-          assigneeId:
-              project.ownerId ??
-              switch (args['assignee']) {
-                final String a => _person(a),
-                _ => null,
-              },
-        );
-        projects.addLabels(project.id, labels);
-        return _taskDetail(created);
+        final assignee =
+            // On a personal project, always its owner.
+            project.ownerId ??
+            switch (args['assignee']) {
+              final String a => _person(a),
+              _ => null,
+            };
+        Map<String, Object?> create({
+          List<String> images = const [],
+          List<Attachment> attachments = const [],
+        }) {
+          final created = tasks.create(
+            title: title,
+            description: (args['description'] as String? ?? '').trim(),
+            status: switch (args['column']) {
+              final String c => _column(project, c).id,
+              _ => project.columns.first.id,
+            },
+            tags: labels,
+            images: images,
+            attachments: attachments,
+            originId: project.id,
+            dueDate: dueDate,
+            dueTime: dueTime,
+            subtasks: [
+              for (final s in _stringList(args['subtasks']))
+                Subtask(id: newId(), title: s),
+            ],
+            assigneeId: assignee,
+          );
+          projects.addLabels(project.id, labels);
+          return _taskDetail(created);
+        }
+
+        if (args['image'] == null && args['attachments'] == null) {
+          return create();
+        }
+        // Files: read (and checked) first, then stored.
+        return () async {
+          final image = await _readImage(args['image']);
+          final attachments = await _readAttachments(
+            args['attachments'],
+            'attachments',
+          );
+          return create(
+            images: [if (image != null) await _store(image)],
+            attachments: await _storeAttachments(attachments),
+          );
+        }();
       },
     ),
     McpTool(
@@ -311,48 +434,38 @@ final class McpTools {
             'description': 'HH:MM (24-hour); null for no time.',
           },
           'labels': _strings('Its labels (replacing the ones it has).'),
+          'image': {
+            ...mcpFileSchema(
+              'A new card image, replacing the one it has; null to remove it.',
+            ),
+            'type': ['object', 'null'],
+          },
+          'addAttachments': {
+            'type': 'array',
+            'description':
+                'Files to attach (images or PDFs), after the others.',
+            'items': mcpFileSchema(
+              'An image or PDF to attach.',
+              allowPdf: true,
+            ),
+          },
+          'removeAttachments': _strings(
+            'Names of attachments to remove (as get_task lists them).',
+          ),
         },
         required: ['taskId'],
       ),
       run: (args) {
-        var task = _task(args);
-        if (args['title'] case final String title) {
-          if (title.trim().isEmpty) {
-            throw const McpToolError('The title is empty.');
-          }
-          task = task.copyWith(title: title.trim());
+        final task = _updated(_task(args), args);
+        final files =
+            args.containsKey('image') ||
+            args['addAttachments'] != null ||
+            args['removeAttachments'] != null;
+        if (!files) {
+          _saveUpdated(task, args);
+          return _taskDetail(tasks.get(task.id) ?? task);
         }
-        if (args['description'] case final String d) {
-          task = task.copyWith(description: d.trim());
-        }
-        if (args.containsKey('assignee') && !_isPersonal(task)) {
-          task = task.copyWith(
-            assigneeId: switch (args['assignee']) {
-              final String a => _person(a),
-              _ => null,
-            },
-          );
-        }
-        if (args.containsKey('dueDate')) {
-          final day = _day(args['dueDate']);
-          task = task.copyWith(
-            dueDate: day,
-            dueTime: day == null ? null : task.dueTime,
-          );
-        }
-        if (args.containsKey('dueTime')) {
-          if (task.dueDate == null && args['dueTime'] != null) {
-            throw const McpToolError('Set a dueDate before a dueTime.');
-          }
-          task = task.copyWith(dueTime: _time(args['dueTime']));
-        }
-        if (args['labels'] != null) {
-          final labels = _labels(args['labels']);
-          task = task.copyWith(tags: labels);
-          projects.addLabels(task.originId, labels);
-        }
-        tasks.save(task);
-        return _taskDetail(tasks.get(task.id) ?? task);
+        return _updateFiles(task, args);
       },
     ),
     McpTool(
@@ -520,6 +633,45 @@ final class McpTools {
       },
     ),
     McpTool(
+      name: 'add_comment',
+      title: 'Add comment',
+      description:
+          'Comments on a task, as the person using the app. The task\'s '
+          'assignee hears about it in Activity (unless it\'s them). Returns '
+          'the comment.',
+      inputSchema: _object(
+        {
+          'taskId': _taskId,
+          'body': _string(
+            'What to say, in Markdown: paragraphs (a blank line between), '
+            '**bold** and [links](https://example.com) only; anything else '
+            'is kept as plain text.',
+          ),
+        },
+        required: ['taskId', 'body'],
+      ),
+      run: (args) {
+        final task = _task(args);
+        final repo = comments;
+        final me = profiles.current?.id;
+        if (repo == null || me == null) {
+          throw const McpToolError('Comments aren\'t available.');
+        }
+        final comment = repo.add(
+          taskId: task.id,
+          authorId: me,
+          body: _requiredString(args, 'body'),
+        );
+        if (comment == null) throw const McpToolError('body is empty.');
+        return {
+          'id': comment.id,
+          'taskId': task.id,
+          'body': comment.body,
+          'createdAt': comment.createdAt.toUtc().toIso8601String(),
+        };
+      },
+    ),
+    McpTool(
       name: 'delete_task',
       title: 'Delete task',
       description:
@@ -599,6 +751,113 @@ final class McpTools {
         .id;
   }
 
+  /// [task] with update_task's text, people, date and label changes (not
+  /// saved).
+  Task _updated(Task task, Map<String, Object?> args) {
+    if (args['title'] case final String title) {
+      if (title.trim().isEmpty) {
+        throw const McpToolError('The title is empty.');
+      }
+      task = task.copyWith(title: title.trim());
+    }
+    if (args['description'] case final String d) {
+      task = task.copyWith(description: d.trim());
+    }
+    if (args.containsKey('assignee') && !_isPersonal(task)) {
+      task = task.copyWith(
+        assigneeId: switch (args['assignee']) {
+          final String a => _person(a),
+          _ => null,
+        },
+      );
+    }
+    if (args.containsKey('dueDate')) {
+      final day = _day(args['dueDate']);
+      task = task.copyWith(
+        dueDate: day,
+        dueTime: day == null ? null : task.dueTime,
+      );
+    }
+    if (args.containsKey('dueTime')) {
+      if (task.dueDate == null && args['dueTime'] != null) {
+        throw const McpToolError('Set a dueDate before a dueTime.');
+      }
+      task = task.copyWith(dueTime: _time(args['dueTime']));
+    }
+    if (args['labels'] != null) {
+      final labels = _labels(args['labels']);
+      task = task.copyWith(tags: labels);
+    }
+    return task;
+  }
+
+  /// Saves an updated task; new labels join its project's.
+  void _saveUpdated(Task task, Map<String, Object?> args) {
+    tasks.save(task);
+    if (args['labels'] != null) projects.addLabels(task.originId, task.tags);
+  }
+
+  /// update_task's card image and attachment changes, then saves [task]:
+  /// new files are read (and checked) before anything is stored, and the
+  /// files it no longer uses are deleted.
+  Future<Map<String, Object?>> _updateFiles(
+    Task task,
+    Map<String, Object?> args,
+  ) async {
+    final remove = _stringList(args['removeAttachments']).toSet();
+    final unknown = remove.difference({
+      for (final a in task.attachments) a.name,
+    });
+    if (unknown.isNotEmpty) {
+      throw McpToolError('No attachment named "${unknown.first}".');
+    }
+    final image = await _readImage(args['image']);
+    final added = await _readAttachments(
+      args['addAttachments'],
+      'addAttachments',
+    );
+    final unused = <String>[];
+    var images = task.images;
+    if (args.containsKey('image')) {
+      unused.addAll(task.images);
+      images = [if (image != null) await _store(image)];
+    }
+    final kept = [
+      for (final a in task.attachments)
+        if (!remove.contains(a.name)) a,
+    ];
+    unused.addAll([
+      for (final a in task.attachments)
+        if (remove.contains(a.name)) a.file,
+    ]);
+    task = task.copyWith(
+      images: images,
+      attachments: [...kept, ...await _storeAttachments(added)],
+    );
+    _saveUpdated(task, args);
+    unused.forEach(tasks.deleteImage);
+    return _taskDetail(tasks.get(task.id) ?? task);
+  }
+
+  Future<McpFile?> _readImage(Object? spec) async =>
+      spec == null ? null : await readMcpFile(spec, argument: 'image');
+
+  Future<List<McpFile>> _readAttachments(Object? specs, String argument) async {
+    if (specs == null) return const [];
+    if (specs is! List) throw McpToolError('$argument must be a list.');
+    return [
+      for (final (i, spec) in specs.indexed)
+        await readMcpFile(spec, argument: '$argument[$i]', allowPdf: true),
+    ];
+  }
+
+  Future<String> _store(McpFile file) =>
+      tasks.addImageBytes(file.bytes, file.extension);
+
+  Future<List<Attachment>> _storeAttachments(List<McpFile> files) async => [
+    for (final f in files) Attachment(file: await _store(f), name: f.name),
+  ];
+
   Task _task(Map<String, Object?> args) {
     final id = _requiredString(args, 'taskId');
     final task = tasks.get(id);
@@ -668,10 +927,19 @@ final class McpTools {
     'id': p.id,
     'name': p.name,
     'personal': p.isPersonal,
+    'description': p.description,
     'columns': [
       for (final c in p.columns) {'id': c.id, 'name': c.title},
     ],
     'taskCount': tasks.inProject(p.id).length,
+  };
+
+  Map<String, Object?> _personJson(Profile p, {String? me}) => {
+    'id': p.id,
+    'name': p.displayName,
+    if (p.department.isNotEmpty) 'department': p.department,
+    if (p.jobTitle.isNotEmpty) 'jobTitle': p.jobTitle,
+    'isMe': p.id == me,
   };
 
   String? _personName(String? id) =>
@@ -729,7 +997,17 @@ final class McpTools {
       for (final s in t.subtasks)
         {'id': s.id, 'title': s.title, 'done': s.done},
     ],
+    'cardImage': t.images.isNotEmpty,
     'attachments': [for (final a in t.attachments) a.name],
+    'comments': [
+      for (final c in comments?.forTask(t.id) ?? const <Comment>[])
+        {
+          'id': c.id,
+          'author': {'id': c.authorId, 'name': _personName(c.authorId)},
+          'body': c.body,
+          'createdAt': c.createdAt.toUtc().toIso8601String(),
+        },
+    ],
     'createdAt': t.createdAt.toUtc().toIso8601String(),
   };
 }
@@ -740,6 +1018,15 @@ String _requiredString(Map<String, Object?> args, String key) =>
     switch (args[key]) {
       final String s when s.isNotEmpty => s,
       _ => throw McpToolError('$key is required.'),
+    };
+
+/// [key]'s text, or null when it isn't given; anything but text is a
+/// mistake.
+String? _optionalString(Map<String, Object?> args, String key) =>
+    switch (args[key]) {
+      null => null,
+      final String s => s,
+      _ => throw McpToolError('$key should be text.'),
     };
 
 List<String> _stringList(Object? value) => switch (value) {

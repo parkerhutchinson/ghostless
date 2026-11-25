@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:codename/comments/comment_repository.dart';
+import 'package:codename/mcp/mcp_files.dart';
 import 'package:codename/mcp/mcp_server.dart';
 import 'package:codename/mcp/mcp_service.dart';
 import 'package:codename/mcp/mcp_tools.dart';
@@ -18,6 +20,7 @@ void main() {
   late ProfileRepository profiles;
   late TaskRepository tasks;
   late McpTools tools;
+  late CommentRepository comments;
   late Project launch;
 
   setUp(() {
@@ -26,7 +29,13 @@ void main() {
     projects = ProjectRepository(store);
     profiles = ProfileRepository(store, dir, projects);
     tasks = TaskRepository(store, dir);
-    tools = McpTools(tasks: tasks, projects: projects, profiles: profiles);
+    comments = CommentRepository(store);
+    tools = McpTools(
+      tasks: tasks,
+      projects: projects,
+      profiles: profiles,
+      comments: comments,
+    );
     profiles.create(name: 'Sam Lee');
     launch = projects.create('Launch');
   });
@@ -77,6 +86,84 @@ void main() {
       expect(projects.current().last.name, 'Custom');
       expect(
         () => run('create_project', {'name': 'launch'}),
+        throwsA(isA<McpToolError>()),
+      );
+    });
+
+    test('add_comment, and get_task lists them', () {
+      final id =
+          (run('create_task', {'project': launch.id, 'title': 'Ship it'})!
+                  as Map)['id']
+              as String;
+      final added =
+          run('add_comment', {
+                'taskId': id,
+                'body': '# Hi\n\nLooks **good**, see [docs](https://x.io)',
+              })!
+              as Map;
+      // Headings aren't kept in comments.
+      expect(added['body'], 'Hi\n\nLooks **good**, see [docs](https://x.io)');
+      final task = run('get_task', {'taskId': id})! as Map;
+      final listed = (task['comments'] as List).single as Map;
+      expect(listed['body'], added['body']);
+      expect((listed['author'] as Map)['name'], 'Sam Lee');
+      expect(
+        () => run('add_comment', {'taskId': id, 'body': '   '}),
+        throwsA(isA<McpToolError>()),
+      );
+    });
+
+    test('create_person: added (not switched to), unique names', () {
+      final made =
+          run('create_person', {
+                'name': 'Ana Ruiz',
+                'jobTitle': 'Producer',
+                'department': 'News',
+              })!
+              as Map;
+      expect(made['name'], 'Ana Ruiz');
+      expect(made['jobTitle'], 'Producer');
+      expect(made['isMe'], false);
+      expect(profiles.current!.name, 'Sam Lee');
+      final people = run('list_people')! as List;
+      expect(people.map((p) => (p as Map)['name']), contains('Ana Ruiz'));
+      // Assignable straight away.
+      final task =
+          run('create_task', {
+                'project': launch.id,
+                'title': 'Edit',
+                'assignee': 'Ana Ruiz',
+              })!
+              as Map;
+      expect(tasks.get(task['id'] as String)!.assigneeId, made['id']);
+      expect(
+        () => run('create_person', {'name': 'ana ruiz'}),
+        throwsA(isA<McpToolError>()),
+      );
+    });
+
+    test('project descriptions: set on create, changed by update', () {
+      final made =
+          run('create_project', {
+                'name': 'Docs',
+                'description': '# Goal\n\nWrite **docs**.',
+              })!
+              as Map;
+      expect(made['description'], '# Goal\n\nWrite **docs**.');
+      final id = made['id'] as String;
+      final renamed =
+          run('update_project', {'project': id, 'name': 'Handbook'})! as Map;
+      // Only what's given changes.
+      expect(renamed['name'], 'Handbook');
+      expect(renamed['description'], '# Goal\n\nWrite **docs**.');
+      run('update_project', {'project': 'handbook', 'description': ''});
+      expect(projects.get(id)!.description, '');
+      expect(
+        () => run('update_project', {'project': id, 'name': 'Launch'}),
+        throwsA(isA<McpToolError>()),
+      );
+      expect(
+        () => run('update_project', {'project': 'Personal', 'name': 'Mine'}),
         throwsA(isA<McpToolError>()),
       );
     });
@@ -255,6 +342,195 @@ void main() {
         () => run('get_task', {'taskId': 'missing'}),
         throwsA(isA<McpToolError>()),
       );
+    });
+  });
+
+  group('card images and attachments', () {
+    // Just enough of each kind for its type to be recognized.
+    final png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+    final pdf = '%PDF-1.7 hello'.codeUnits;
+    Map<String, Object?> data(List<int> bytes, [String? name]) => {
+      'data': base64.encode(bytes),
+      'name': ?name,
+    };
+    Future<Map> call(String tool, Map<String, Object?> args) async =>
+        (await tools.named(tool)!.run(args))! as Map;
+    Future<Map> create(Map<String, Object?> more) =>
+        call('create_task', {'project': launch.id, 'title': 'Pics', ...more});
+    File stored(String name) => tasks.imageFile(name);
+
+    test('create_task stores a card image and attachments', () async {
+      final made = await create({
+        'image': data(png),
+        'attachments': [data(pdf, 'Spec'), data(png, 'shot.png')],
+      });
+      expect(made['cardImage'], isTrue);
+      expect(made['attachments'], ['Spec.pdf', 'shot.png']);
+      final task = tasks.get(made['id'] as String)!;
+      expect(task.images.single, endsWith('.png'));
+      expect(stored(task.images.single).readAsBytesSync(), png);
+      expect(task.attachments.first.file, endsWith('.pdf'));
+      expect(stored(task.attachments.first.file).readAsBytesSync(), pdf);
+    });
+
+    test('a data: URL works as data', () async {
+      final made = await create({
+        'image': {'data': 'data:image/png;base64,${base64.encode(png)}'},
+      });
+      expect(made['cardImage'], isTrue);
+    });
+
+    test('without files it stays as it was: no image', () {
+      final made =
+          run('create_task', {'project': launch.id, 'title': 'Plain'})! as Map;
+      expect(made['cardImage'], isFalse);
+      expect(made['attachments'], isEmpty);
+    });
+
+    test('from a url', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((r) {
+        if (r.uri.path == '/cat.png') {
+          r.response.add(png);
+        } else {
+          r.response.statusCode = 404;
+        }
+        r.response.close();
+      });
+      final base = 'http://127.0.0.1:${server.port}';
+      final made = await create({
+        'attachments': [
+          {'url': '$base/cat.png'},
+        ],
+      });
+      expect(made['attachments'], ['cat.png']);
+      await expectLater(
+        create({
+          'image': {'url': '$base/missing.png'},
+        }),
+        throwsA(
+          isA<McpToolError>().having(
+            (e) => e.message,
+            'message',
+            contains('404'),
+          ),
+        ),
+      );
+      await server.close(force: true);
+    });
+
+    test('from a path it can read; a clear error when it can\'t', () async {
+      final file = File('${dir.path}/photo.png')..writeAsBytesSync(png);
+      final made = await create({
+        'attachments': [
+          {'path': file.path},
+        ],
+      });
+      expect(made['attachments'], ['photo.png']);
+      await expectLater(
+        create({
+          'image': {'path': '${dir.path}/nope.png'},
+        }),
+        throwsA(
+          isA<McpToolError>().having(
+            (e) => e.message,
+            'message',
+            contains('data (base64) or a url'),
+          ),
+        ),
+      );
+    });
+
+    test('anything else is refused, and no task is made', () async {
+      final before = tasks.inProject(launch.id).length;
+      for (final bad in <Map<String, Object?>>[
+        {'image': data('just text'.codeUnits)},
+        // A PDF can be attached, but isn't a card image.
+        {'image': data(pdf)},
+        {
+          'image': {'data': 'not base64!!'},
+        },
+        {'image': <String, Object?>{}},
+        {
+          'image': {'data': base64.encode(png), 'url': 'https://x.com/a.png'},
+        },
+        {
+          'attachments': [
+            {'url': 'ftp://x.com/a.png'},
+          ],
+        },
+      ]) {
+        await expectLater(
+          create(bad),
+          throwsA(isA<McpToolError>()),
+          reason: '$bad',
+        );
+      }
+      expect(tasks.inProject(launch.id), hasLength(before));
+      expect(
+        tasks.imagesDir.existsSync() ? tasks.imagesDir.listSync() : [],
+        isEmpty,
+      );
+    });
+
+    test('names follow what the file is', () async {
+      final made = await create({
+        'attachments': [data(png, 'diagram.jpg'), data(pdf)],
+      });
+      expect(made['attachments'], ['diagram.png', 'document.pdf']);
+    });
+
+    test('update_task replaces, removes and adds; old files go', () async {
+      final made = await create({
+        'image': data(png),
+        'attachments': [data(pdf, 'a.pdf'), data(pdf, 'b.pdf')],
+      });
+      final id = made['id'] as String;
+      final first = tasks.get(id)!;
+      final oldImage = first.images.single;
+      final oldA = first.attachments.first.file;
+
+      final updated = await call('update_task', {
+        'taskId': id,
+        'image': data(png),
+        'removeAttachments': ['a.pdf'],
+        'addAttachments': [data(png, 'c.png')],
+        'title': 'Pics 2',
+      });
+      expect(updated['title'], 'Pics 2');
+      expect(updated['attachments'], ['b.pdf', 'c.png']);
+      final task = tasks.get(id)!;
+      expect(task.images.single, isNot(oldImage));
+      expect(stored(oldImage).existsSync(), isFalse);
+      expect(stored(oldA).existsSync(), isFalse);
+
+      final cleared = await call('update_task', {'taskId': id, 'image': null});
+      expect(cleared['cardImage'], isFalse);
+      expect(stored(task.images.single).existsSync(), isFalse);
+    });
+
+    test('update_task: an unknown attachment changes nothing', () async {
+      final made = await create({
+        'attachments': [data(pdf, 'a.pdf')],
+      });
+      await expectLater(
+        call('update_task', {
+          'taskId': made['id'],
+          'title': 'Renamed',
+          'removeAttachments': ['zzz.pdf'],
+        }),
+        throwsA(isA<McpToolError>()),
+      );
+      expect(tasks.get(made['id'] as String)!.title, 'Pics');
+    });
+
+    test('what a file is comes from its first bytes', () {
+      expect(sniffExtension([0xFF, 0xD8, 0xFF, 0xE0]), 'jpg');
+      expect(sniffExtension('GIF89a'.codeUnits), 'gif');
+      expect(sniffExtension('RIFF\x00\x00\x00\x00WEBPVP8 '.codeUnits), 'webp');
+      expect(sniffExtension('\x00\x00\x00\x18ftypheic'.codeUnits), 'heic');
+      expect(sniffExtension('<html>'.codeUnits), isNull);
+      expect(sniffExtension(const []), isNull);
     });
   });
 

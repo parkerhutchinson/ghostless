@@ -1,3 +1,5 @@
+import '../comments/comments_scope.dart';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -588,6 +590,7 @@ class _Body extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final comments = CommentsScope.countOf(context, task.id);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       spacing: 10,
@@ -669,6 +672,7 @@ class _Body extends StatelessWidget {
         // right.
         if (task.dueDate != null ||
             task.attachments.isNotEmpty ||
+            comments > 0 ||
             (showAssignee && (task.assigneeId != null || onAssign != null)))
           Row(
             children: [
@@ -684,6 +688,22 @@ class _Body extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.end,
                   spacing: 10,
                   children: [
+                    // How many files are attached and how many comments,
+                    // before the date.
+                    if (task.attachments.isNotEmpty)
+                      _CountBadge(
+                        icon: Symbols.attach_file,
+                        // Tall and thin: a touch bigger to look as big.
+                        iconSize: 12,
+                        count: task.attachments.length,
+                        noun: 'attachment',
+                      ),
+                    if (comments > 0)
+                      _CountBadge(
+                        icon: Symbols.chat_bubble,
+                        count: comments,
+                        noun: 'comment',
+                      ),
                     if (task.dueDate != null)
                       Flexible(
                         child: _DueLabel(
@@ -692,9 +712,6 @@ class _Body extends StatelessWidget {
                           outlined: false,
                         ),
                       ),
-                    // How many files are attached, after the date.
-                    if (task.attachments.isNotEmpty)
-                      _AttachmentCount(count: task.attachments.length),
                   ],
                 ),
               ),
@@ -741,7 +758,10 @@ class _DueLabel extends StatelessWidget {
     final label = Container(
       padding: outlined
           ? const EdgeInsets.fromLTRB(6, 3, 7, 3)
-          : const EdgeInsets.symmetric(vertical: 3),
+          // Nearly none: on a card without an avatar, the date is the last
+          // thing on it, and padding here would leave more space under it
+          // than above the checkbox.
+          : const EdgeInsets.symmetric(vertical: 1),
       decoration: outlined
           ? BoxDecoration(
               borderRadius: formRadius,
@@ -778,22 +798,37 @@ class _DueLabel extends StatelessWidget {
 
 /// A paperclip and how many files a task has attached, styled like the
 /// due date beside it.
-class _AttachmentCount extends StatelessWidget {
-  const _AttachmentCount({required this.count});
+/// A small count with its icon, before the due date: attachments,
+/// comments.
+class _CountBadge extends StatelessWidget {
+  const _CountBadge({
+    required this.icon,
+    required this.count,
+    required this.noun,
+    this.iconSize = 11,
+  });
+  final IconData icon;
+
+  /// The due date's calendar size by default, so they look alike.
+  final double iconSize;
   final int count;
+
+  /// What's counted, for the tooltip: "3 comments".
+  final String noun;
 
   @override
   Widget build(BuildContext context) {
     final color = context.colors.text;
     return Tooltip(
-      message: '$count attachment${count == 1 ? '' : 's'}',
+      message: '$count $noun${count == 1 ? '' : 's'}',
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
+        // As little as the due date's, beside it.
+        padding: const EdgeInsets.symmetric(vertical: 1),
         child: Row(
           mainAxisSize: MainAxisSize.min,
-          spacing: 3,
+          spacing: 4,
           children: [
-            Icon(Symbols.attach_file, size: 13, color: color),
+            Icon(icon, size: iconSize, color: color),
             Text(
               '$count',
               style: TextStyle(

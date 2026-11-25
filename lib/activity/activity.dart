@@ -18,7 +18,10 @@ enum ActivityKind {
   dueToday,
 
   /// Reminder: a task assigned to them is past due ([Activity.dueAt]).
-  overdue;
+  overdue,
+
+  /// Someone commented on a task assigned to them ([Activity.excerpt]).
+  commented;
 
   /// A reminder from the app, not something a person did.
   bool get isReminder => this == dueToday || this == overdue;
@@ -100,10 +103,14 @@ final class Activity {
     required this.kind,
     this.changes = const [],
     this.dueAt,
+    this.excerpt,
     required this.createdAt,
     this.readAt,
     this.dismissedAt,
   });
+
+  /// The start of what was said, for [ActivityKind.commented].
+  final String? excerpt;
 
   final String id;
 
@@ -156,6 +163,7 @@ final class Activity {
     kind: kind,
     changes: changes ?? this.changes,
     dueAt: dueAt,
+    excerpt: excerpt,
     createdAt: createdAt ?? this.createdAt,
     readAt: readAt ?? this.readAt,
     dismissedAt: dismissedAt ?? this.dismissedAt,
@@ -169,6 +177,7 @@ final class Activity {
     'kind': kind.name,
     'changes': [for (final c in changes) c.name],
     'dueAt': dueAt?.toUtc().toIso8601String(),
+    'excerpt': excerpt,
     'createdAt': createdAt.toUtc().toIso8601String(),
     'readAt': readAt?.toUtc().toIso8601String(),
     'dismissedAt': dismissedAt?.toUtc().toIso8601String(),
@@ -195,6 +204,7 @@ final class Activity {
             ...TaskChange.values.where((c) => c.name == name),
       ],
       dueAt: DateTime.tryParse(json['dueAt'] as String? ?? ''),
+      excerpt: json['excerpt'] as String?,
       createdAt:
           DateTime.tryParse(json['createdAt'] as String? ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),

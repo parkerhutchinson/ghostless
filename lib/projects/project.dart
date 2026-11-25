@@ -79,8 +79,13 @@ final class Project {
     this.logo,
     this.labels = const [],
     this.labelColors = const {},
+    this.description = '',
     required this.createdAt,
   });
+
+  /// What the project is about, in Markdown (the same subset as a task's
+  /// description: see [RichTextModel]). Shown and edited on its dashboard.
+  final String description;
 
   /// The color picked for a label when it was created: an index into the
   /// label palette, by label lowercased. Labels without one use a color
@@ -130,6 +135,7 @@ final class Project {
     Object? logo = _keep,
     List<String>? labels,
     Map<String, int>? labelColors,
+    String? description,
   }) => Project(
     id: id,
     name: name ?? this.name,
@@ -140,6 +146,7 @@ final class Project {
     logo: identical(logo, _keep) ? this.logo : logo as ProjectLogo?,
     labels: labels ?? this.labels,
     labelColors: labelColors ?? this.labelColors,
+    description: description ?? this.description,
     createdAt: createdAt,
   );
 
@@ -156,6 +163,7 @@ final class Project {
     'logo': logo?.toJson(),
     'labels': labels,
     'labelColors': labelColors,
+    'description': description,
     'createdAt': createdAt.toUtc().toIso8601String(),
   };
 
@@ -173,6 +181,7 @@ final class Project {
         for (final MapEntry(:key, :value) in colors.entries)
           if (key is String && value is num) key: value.toInt(),
     },
+    description: json['description'] as String? ?? '',
     createdAt:
         DateTime.tryParse(json['createdAt'] as String? ?? '') ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),

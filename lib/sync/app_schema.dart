@@ -44,6 +44,7 @@ const appSchema = <String, Map<String, ValueKind>>{
     'logo': ValueKind.object,
     'labels': ValueKind.stringList,
     'labelColors': ValueKind.object,
+    'description': ValueKind.string,
     'createdAt': ValueKind.timestamp,
   },
   'tasks': {
@@ -82,9 +83,16 @@ const appSchema = <String, Map<String, ValueKind>>{
     'kind': ValueKind.string,
     'changes': ValueKind.stringList,
     'dueAt': ValueKind.timestamp,
+    'excerpt': ValueKind.string,
     'createdAt': ValueKind.timestamp,
     'readAt': ValueKind.timestamp,
     'dismissedAt': ValueKind.timestamp,
+  },
+  'comments': {
+    'taskId': ValueKind.string,
+    'authorId': ValueKind.string,
+    'body': ValueKind.string,
+    'createdAt': ValueKind.timestamp,
   },
 };
 

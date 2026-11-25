@@ -532,7 +532,7 @@ class _ColumnHeaderState extends State<ColumnHeader> {
             // Same size and padding as the ⋯ next to it.
             iconSize: 17,
             padding: EdgeInsets.zero,
-            style: _headerButtonFill(context).merge(
+            style: headerButtonFill(context).merge(
               IconButton.styleFrom(
                 fixedSize: const Size(26, 26),
                 minimumSize: const Size(26, 26),
@@ -558,7 +558,7 @@ class _ColumnHeaderState extends State<ColumnHeader> {
 
 /// A column heading's + and ⋯: no tile until hovered (or pressed), then
 /// the count's shade beside them, with no tint over it.
-ButtonStyle _headerButtonFill(BuildContext context) => ButtonStyle(
+ButtonStyle headerButtonFill(BuildContext context) => ButtonStyle(
   backgroundColor: WidgetStateProperty.resolveWith(
     (states) =>
         states.contains(WidgetState.hovered) ||
@@ -618,7 +618,7 @@ class _ColumnMenu extends StatelessWidget {
       iconSize: 17,
       padding: EdgeInsets.zero,
       // Like the + beside it: no tile until hovered.
-      style: _headerButtonFill(context).merge(context.colors.menuButtonStyle),
+      style: headerButtonFill(context).merge(context.colors.menuButtonStyle),
       icon: Icon(Symbols.more_horiz),
       onSelected: (action) => action(),
       itemBuilder: (_) => [

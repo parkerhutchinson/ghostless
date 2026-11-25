@@ -52,3 +52,42 @@ class _BottomFadeState extends State<BottomFade> {
     );
   }
 }
+
+/// A [SingleChildScrollView] whose bottom fades out ([BottomFade]), with
+/// its scrollbar outside the fade so the scrollbar never fades with it.
+/// Use it for any page that scrolls to the bottom of the window.
+class BottomFadeScrollView extends StatefulWidget {
+  const BottomFadeScrollView({super.key, required this.child, this.padding});
+
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+
+  @override
+  State<BottomFadeScrollView> createState() => _BottomFadeScrollViewState();
+}
+
+class _BottomFadeScrollViewState extends State<BottomFadeScrollView> {
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ScrollConfiguration(
+    // The automatic scrollbar would be drawn inside the fade.
+    behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+    child: Scrollbar(
+      controller: _scroll,
+      child: BottomFade(
+        child: SingleChildScrollView(
+          controller: _scroll,
+          padding: widget.padding,
+          child: widget.child,
+        ),
+      ),
+    ),
+  );
+}

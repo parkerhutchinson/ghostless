@@ -513,7 +513,7 @@ void main() {
       await pump(tester);
       await tester.tap(text('Create your first project'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField), 'Launch');
+      await tester.enterText(find.byType(TextField).first, 'Launch');
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
       expect(text('Launch'), findsNWidgets(2)); // sidebar + header
@@ -531,7 +531,7 @@ void main() {
 
       await tester.tap(text('Create your first project'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField), 'Launch');
+      await tester.enterText(find.byType(TextField).first, 'Launch');
       await tester.pump();
       await tester.tap(text('Create project'));
       await tester.pumpAndSettle();
@@ -706,7 +706,7 @@ void main() {
 
       await openProjectMenu(tester, 'Old name');
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField), 'New name');
+      await tester.enterText(find.byType(TextField).first, 'New name');
       await tester.pump();
       await tester.tap(text('Save'));
       await tester.pumpAndSettle();

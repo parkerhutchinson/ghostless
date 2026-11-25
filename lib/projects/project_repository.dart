@@ -31,6 +31,7 @@ class ProjectRepository {
     int? colorIndex,
     String? ownerId,
     ProjectLogo? logo,
+    String description = '',
   }) {
     final all = current();
     final project = Project(
@@ -40,6 +41,7 @@ class ProjectRepository {
       order: all.isEmpty ? 0 : all.last.order + 1,
       ownerId: ownerId,
       logo: logo,
+      description: description,
       createdAt: DateTime.now().toUtc(),
     );
     save(project);

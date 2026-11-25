@@ -22,6 +22,7 @@ import '../profiles/profile.dart';
 import '../profiles/profile_dialog.dart';
 import '../profiles/profile_repository.dart';
 import 'project.dart';
+import 'project_views.dart';
 import 'project_dialog.dart';
 import 'project_repository.dart';
 import 'project_sidebar.dart';
@@ -79,6 +80,10 @@ class _WorkspaceState extends State<Workspace> {
   late final Stream<List<Project>> _projects = widget.projects.watch();
   late final Stream<List<Task>> _tasks = widget.tasks.watch();
   late final Stream<Profile?> _profile = widget.profiles.watchCurrent();
+
+  /// Each project's view (board, list, dashboard), remembered here.
+  late final _views = ProjectViews(widget.store);
+
   late String? _selectedId =
       widget.store.get(_uiCollection, _uiKey)?['projectId'] as String?;
 
@@ -86,6 +91,7 @@ class _WorkspaceState extends State<Workspace> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_onKey);
+    _menu.setMethodCallHandler(_onMenu);
     _adoptOrphans();
     // Image files of tasks deleted just before the app last quit.
     widget.tasks.deleteUnusedImages();
@@ -107,6 +113,7 @@ class _WorkspaceState extends State<Workspace> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onKey);
+    _menu.setMethodCallHandler(null);
     super.dispose();
   }
 
@@ -127,6 +134,78 @@ class _WorkspaceState extends State<Workspace> {
     return true;
   }
 
+  /// The macOS menu bar's choices the app handles: the app menu's
+  /// Settings… (⌘,), File › New Task (⌘N), New Personal Task (⌥⌘N) and
+  /// New Project (⇧⌘N), wired
+  /// up in macos/Runner/AppDelegate.swift.
+  static const _menu = MethodChannel('codename/menu');
+
+  Future<void> _onMenu(MethodCall call) async {
+    switch (call.method) {
+      case 'openSettings':
+        _openSettings();
+      // New things only with nothing open over the page, like the
+      // shortcuts (a task's form, a dialog).
+      case 'newTask' when _pageIsFront:
+        _newTask();
+      case 'newPersonalTask' when _pageIsFront:
+        _newPersonalTask();
+      case 'newProject' when _pageIsFront:
+        _create();
+    }
+  }
+
+  bool get _pageIsFront => ModalRoute.of(context)?.isCurrent ?? true;
+
+  /// A new task for the project showing ([TasksPage.newTaskRequest]); from
+  /// Activity, on the project it falls back to.
+  int? _newTaskRequest;
+  int _newTaskSerial = 0;
+
+  void _newTask() {
+    // No project to put it in.
+    final profile = widget.profiles.current?.id;
+    if (visibleProjects(widget.projects.current(), profile).isEmpty) return;
+    _newTaskRequest = ++_newTaskSerial;
+    _select(_selectedId == Workspace.activityViewId ? null : _selectedId);
+  }
+
+  /// A new task in this profile's personal project, switching to it.
+  void _newPersonalTask() {
+    final profile = widget.profiles.current?.id;
+    final personal = visibleProjects(
+      widget.projects.current(),
+      profile,
+    ).where((p) => p.isPersonal).firstOrNull;
+    if (personal == null) return;
+    _newTaskRequest = ++_newTaskSerial;
+    _select(personal.id);
+  }
+
+  /// Whether Settings is open, so the menu doesn't open a second one.
+  bool _settingsOpen = false;
+
+  /// Settings, from the sidebar's button or the app menu.
+  Future<void> _openSettings() async {
+    if (_settingsOpen) return;
+    _settingsOpen = true;
+    try {
+      await showSettingsDialog(
+        context,
+        widget.settings,
+        sync: widget.sync,
+        export: ExportSources(
+          projects: widget.projects,
+          tasks: widget.tasks,
+          profiles: widget.profiles,
+        ),
+        mcp: widget.mcp,
+      );
+    } finally {
+      _settingsOpen = false;
+    }
+  }
+
   /// Search: a found task opens on its board.
   void _search() => showSearchDialog(
     context,
@@ -145,7 +224,10 @@ class _WorkspaceState extends State<Workspace> {
   var _openSerial = 0;
 
   /// Goes to [projectId]'s board and opens [task] there.
+  /// On the board, whatever view the project was left in: the task is
+  /// opened among the others, not over a dashboard or a list.
   void _openTask(Task task, String projectId) {
+    _views.set(projectId, TaskView.board);
     _openRequest = (taskId: task.id, serial: ++_openSerial);
     _select(projectId);
   }
@@ -165,6 +247,7 @@ class _WorkspaceState extends State<Workspace> {
       result.name,
       colorIndex: result.colorIndex,
       logo: result.logo,
+      description: result.description,
     );
     _select(project.id);
   }
@@ -185,6 +268,7 @@ class _WorkspaceState extends State<Workspace> {
         name: result.name,
         colorIndex: result.colorIndex,
         logo: result.logo,
+        description: result.description,
       ),
     );
   }
@@ -329,17 +413,7 @@ class _WorkspaceState extends State<Workspace> {
                   final sync? => SyncStatusIndicator(sync: sync),
                   null => null,
                 },
-                onOpenSettings: () => showSettingsDialog(
-                  context,
-                  widget.settings,
-                  sync: widget.sync,
-                  export: ExportSources(
-                    projects: widget.projects,
-                    tasks: widget.tasks,
-                    profiles: widget.profiles,
-                  ),
-                  mcp: widget.mcp,
-                ),
+                onOpenSettings: _openSettings,
               ),
             ),
           ),
@@ -369,7 +443,14 @@ class _WorkspaceState extends State<Workspace> {
                   projectRepo: widget.projects,
                   openRequest: _openRequest,
                   onTaskOpened: () => _openRequest = null,
+                  newTaskRequest: _newTaskRequest,
+                  onNewTaskOpened: () => _newTaskRequest = null,
                   onSearch: _search,
+                  view: _views.of(selected.id),
+                  onViewChanged: (view) => _views.set(selected.id, view),
+                  onEditProject: selected.isPersonal
+                      ? null
+                      : () => _edit(selected),
                 ),
         ),
       ],

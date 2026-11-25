@@ -8,7 +8,7 @@ const optionalFields = <String, Set<String>>{
   'projects': {'ownerId', 'logo'},
   'tasks': {'dueDate', 'dueTime', 'assigneeId'},
   'profiles': {'imageFile', 'personalProjectId'},
-  'activity': {'actorId', 'dueAt', 'readAt', 'dismissedAt'},
+  'activity': {'actorId', 'dueAt', 'excerpt', 'readAt', 'dismissedAt'},
 };
 
 enum CheckLevel { passed, warning, error }

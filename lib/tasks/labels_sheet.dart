@@ -66,6 +66,16 @@ class _LabelsSheetState extends State<LabelsSheet> {
   int get _tasksLosingLabels =>
       _deleted.fold(0, (sum, d) => sum + widget.labels.usage(d.original));
 
+  /// Backing out of the confirmation (← or Escape): the deletions it
+  /// asked about are called off, the labels back in the list. Other
+  /// changes stay.
+  void _cancelDelete() => setState(() {
+    _confirming = false;
+    for (final d in _deleted) {
+      d.deleted = false;
+    }
+  });
+
   void _save() {
     if (!_dirty) return;
     if (!_confirming && _tasksLosingLabels > 0) {
@@ -93,7 +103,7 @@ class _LabelsSheetState extends State<LabelsSheet> {
         DismissIntent: CallbackAction<DismissIntent>(
           onInvoke: (_) {
             if (_confirming) {
-              setState(() => _confirming = false);
+              _cancelDelete();
             } else {
               widget.onClose();
             }
@@ -222,9 +232,7 @@ class _LabelsSheetState extends State<LabelsSheet> {
     child: Row(
       children: [
         FormCloseButton(
-          onPressed: _confirming
-              ? () => setState(() => _confirming = false)
-              : widget.onClose,
+          onPressed: _confirming ? _cancelDelete : widget.onClose,
         ),
         const Spacer(),
         FilledButton(

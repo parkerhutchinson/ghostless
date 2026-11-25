@@ -88,6 +88,31 @@ class LocalStore implements SyncAdapter {
     _localWrites.add(collection);
   }
 
+  /// Saves several records in [collection] at once: one transaction, and
+  /// watchers hear about it once (not once per record, which re-reads the
+  /// whole collection each time).
+  void putAll(String collection, Map<String, Map<String, Object?>> records) {
+    if (records.isEmpty) return;
+    final now = _now();
+    _db.execute('BEGIN IMMEDIATE');
+    try {
+      for (final MapEntry(key: id, value: data) in records.entries) {
+        _write(
+          collection,
+          Change.upsert(id: id, data: data, updatedAt: now),
+          'local',
+          notify: false,
+        );
+      }
+      _db.execute('COMMIT');
+    } catch (_) {
+      _db.execute('ROLLBACK');
+      rethrow;
+    }
+    _changes.add(collection);
+    _localWrites.add(collection);
+  }
+
   /// Deletes a record locally (kept as a tombstone so the delete can sync).
   void delete(String collection, String id) {
     _write(collection, Change.delete(id: id, updatedAt: _now()), 'local');

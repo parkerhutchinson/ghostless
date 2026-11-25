@@ -393,6 +393,18 @@ const headingScale = [1.0, 1.6, 1.35, 1.15];
 /// lists. Nothing else on purpose. ⌘B, ⌘I,
 /// ⌘⇧X and ⌘K work too. Return starts a new paragraph (or list item);
 /// Shift-Return breaks the line.
+/// The formatting a [RichTextEditor] offers: its toolbar buttons, with
+/// their shortcuts.
+enum RichTextTool {
+  heading,
+  bold,
+  italic,
+  strike,
+  link,
+  bulletList,
+  numberedList,
+}
+
 class RichTextEditor extends StatefulWidget {
   const RichTextEditor({
     super.key,
@@ -400,23 +412,50 @@ class RichTextEditor extends StatefulWidget {
     this.fontSize = 12,
     this.minLines = 6,
     this.hintText,
+    this.tools = const {...RichTextTool.values},
+    this.onSubmit,
+    this.focusNode,
+    this.bordered = true,
+    this.padding,
   });
+
+  /// Space around the text inside the outline; the field's usual when
+  /// null.
+  final EdgeInsets? padding;
+
+  /// With its own outline (the form's fields). Off when it sits inside a
+  /// box of its own (a comment, with its button): the toolbar and text
+  /// are then padded to sit in that box.
+  final bool bordered;
 
   final RichTextController controller;
   final double fontSize;
   final int minLines;
   final String? hintText;
 
+  /// Which formatting it offers (all by default). A comment offers bold
+  /// and links only.
+  final Set<RichTextTool> tools;
+
+  /// ⌘Return, e.g. to post a comment; null for none.
+  final VoidCallback? onSubmit;
+
+  /// The text field's focus, to focus it from outside; its own otherwise.
+  final FocusNode? focusNode;
+
   @override
   State<RichTextEditor> createState() => _RichTextEditorState();
 }
 
 class _RichTextEditorState extends State<RichTextEditor> {
-  final _focus = FocusNode();
+  late final _ownFocus = FocusNode();
+  FocusNode get _focus => widget.focusNode ?? _ownFocus;
+
+  bool _has(RichTextTool t) => widget.tools.contains(t);
 
   @override
   void dispose() {
-    _focus.dispose();
+    _ownFocus.dispose();
     super.dispose();
   }
 
@@ -445,17 +484,26 @@ class _RichTextEditorState extends State<RichTextEditor> {
   Widget build(BuildContext context) {
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyB, meta: true): () =>
-            _c.toggle(MarkType.bold),
-        const SingleActivator(LogicalKeyboardKey.keyI, meta: true): () =>
-            _c.toggle(MarkType.italic),
-        const SingleActivator(
-          LogicalKeyboardKey.keyX,
-          meta: true,
-          shift: true,
-        ): () =>
-            _c.toggle(MarkType.strike),
-        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _editLink,
+        if (_has(RichTextTool.bold))
+          const SingleActivator(LogicalKeyboardKey.keyB, meta: true): () =>
+              _c.toggle(MarkType.bold),
+        if (_has(RichTextTool.italic))
+          const SingleActivator(LogicalKeyboardKey.keyI, meta: true): () =>
+              _c.toggle(MarkType.italic),
+        if (_has(RichTextTool.strike))
+          const SingleActivator(
+            LogicalKeyboardKey.keyX,
+            meta: true,
+            shift: true,
+          ): () =>
+              _c.toggle(MarkType.strike),
+        if (_has(RichTextTool.link))
+          const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _editLink,
+        if (widget.onSubmit case final submit?) ...{
+          const SingleActivator(LogicalKeyboardKey.enter, meta: true): submit,
+          const SingleActivator(LogicalKeyboardKey.numpadEnter, meta: true):
+              submit,
+        },
         // Ahead of the text field's own undo, which only knows the text.
         const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): _c.undo,
         const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true):
@@ -467,9 +515,14 @@ class _RichTextEditorState extends State<RichTextEditor> {
         children: [
           // Counts as part of the field: clicking it doesn't unfocus it.
           TextFieldTapRegion(
-            child: ListenableBuilder(
-              listenable: _c,
-              builder: (context, _) => _toolbar(context),
+            child: Padding(
+              padding: widget.bordered
+                  ? EdgeInsets.zero
+                  : const EdgeInsets.fromLTRB(6, 6, 6, 0),
+              child: ListenableBuilder(
+                listenable: _c,
+                builder: (context, _) => _toolbar(context),
+              ),
             ),
           ),
           Focus(
@@ -495,8 +548,16 @@ class _RichTextEditorState extends State<RichTextEditor> {
                   fontSize: widget.fontSize,
                   color: context.colors.placeholder,
                 ),
-                enabledBorder: context.colors.fieldBorder,
-                border: context.colors.fieldBorder,
+                enabledBorder: widget.bordered
+                    ? context.colors.fieldBorder
+                    : InputBorder.none,
+                focusedBorder: widget.bordered ? null : InputBorder.none,
+                border: widget.bordered
+                    ? context.colors.fieldBorder
+                    : InputBorder.none,
+                contentPadding: widget.bordered
+                    ? widget.padding
+                    : const EdgeInsets.fromLTRB(12, 2, 12, 6),
               ),
             ),
           ),
@@ -525,54 +586,72 @@ class _RichTextEditorState extends State<RichTextEditor> {
 
   Widget _toolbar(BuildContext context) {
     final link = _c.currentLink;
+    // The tools offered, in groups; a divider between groups.
+    final groups = [
+      [
+        if (_has(RichTextTool.heading))
+          _HeadingMenu(
+            level: _c.headingLevel,
+            onPicked: (level) {
+              _c.setHeading(level);
+              _focus.requestFocus();
+            },
+          ),
+      ],
+      [
+        if (_has(RichTextTool.bold))
+          _ToolButton(
+            icon: Symbols.format_bold,
+            tooltip: 'Bold (⌘B)',
+            active: _c.isActive(MarkType.bold),
+            onPressed: () => _c.toggle(MarkType.bold),
+          ),
+        if (_has(RichTextTool.italic))
+          _ToolButton(
+            icon: Symbols.format_italic,
+            tooltip: 'Italic (⌘I)',
+            active: _c.isActive(MarkType.italic),
+            onPressed: () => _c.toggle(MarkType.italic),
+          ),
+        if (_has(RichTextTool.strike))
+          _ToolButton(
+            icon: Symbols.format_strikethrough,
+            tooltip: 'Strikethrough (⌘⇧X)',
+            active: _c.isActive(MarkType.strike),
+            onPressed: () => _c.toggle(MarkType.strike),
+          ),
+        if (_has(RichTextTool.link))
+          _ToolButton(
+            icon: Symbols.link,
+            tooltip: 'Link (⌘K)',
+            active: link != null,
+            onPressed: _editLink,
+          ),
+      ],
+      [
+        if (_has(RichTextTool.bulletList))
+          _ToolButton(
+            icon: Symbols.format_list_bulleted,
+            tooltip: 'Bulleted list',
+            active: _c.isList(ListKind.bullet),
+            onPressed: () => _c.toggleList(ListKind.bullet),
+          ),
+        if (_has(RichTextTool.numberedList))
+          _ToolButton(
+            glyph: const _NumberedListIcon(),
+            tooltip: 'Numbered list',
+            active: _c.isList(ListKind.numbered),
+            onPressed: () => _c.toggleList(ListKind.numbered),
+          ),
+      ],
+    ].where((g) => g.isNotEmpty).toList();
     return Row(
       spacing: 2,
       children: [
-        _HeadingMenu(
-          level: _c.headingLevel,
-          onPicked: (level) {
-            _c.setHeading(level);
-            _focus.requestFocus();
-          },
-        ),
-        const _Divider(),
-        _ToolButton(
-          icon: Symbols.format_bold,
-          tooltip: 'Bold (⌘B)',
-          active: _c.isActive(MarkType.bold),
-          onPressed: () => _c.toggle(MarkType.bold),
-        ),
-        _ToolButton(
-          icon: Symbols.format_italic,
-          tooltip: 'Italic (⌘I)',
-          active: _c.isActive(MarkType.italic),
-          onPressed: () => _c.toggle(MarkType.italic),
-        ),
-        _ToolButton(
-          icon: Symbols.format_strikethrough,
-          tooltip: 'Strikethrough (⌘⇧X)',
-          active: _c.isActive(MarkType.strike),
-          onPressed: () => _c.toggle(MarkType.strike),
-        ),
-        _ToolButton(
-          icon: Symbols.link,
-          tooltip: 'Link (⌘K)',
-          active: link != null,
-          onPressed: _editLink,
-        ),
-        const _Divider(),
-        _ToolButton(
-          icon: Symbols.format_list_bulleted,
-          tooltip: 'Bulleted list',
-          active: _c.isList(ListKind.bullet),
-          onPressed: () => _c.toggleList(ListKind.bullet),
-        ),
-        _ToolButton(
-          glyph: const _NumberedListIcon(),
-          tooltip: 'Numbered list',
-          active: _c.isList(ListKind.numbered),
-          onPressed: () => _c.toggleList(ListKind.numbered),
-        ),
+        for (final (i, g) in groups.indexed) ...[
+          if (i > 0) const _Divider(),
+          ...g,
+        ],
         // In a link: where it goes, and a button to open it.
         if (link != null) ...[
           const SizedBox(width: 8),
@@ -594,6 +673,57 @@ class _RichTextEditorState extends State<RichTextEditor> {
       ],
     );
   }
+}
+
+/// Rich text (the editor's Markdown) shown read only, drawn exactly as
+/// the editor draws it: a project's description, a comment. Selectable,
+/// to copy from; clicking a link opens it.
+class RichTextView extends StatefulWidget {
+  const RichTextView({super.key, required this.markdown, this.fontSize = 13});
+  final String markdown;
+  final double fontSize;
+
+  @override
+  State<RichTextView> createState() => _RichTextViewState();
+}
+
+class _RichTextViewState extends State<RichTextView> {
+  late RichTextController _c = RichTextController.fromMarkdown(widget.markdown);
+
+  @override
+  void didUpdateWidget(RichTextView old) {
+    super.didUpdateWidget(old);
+    if (widget.markdown != old.markdown) {
+      final previous = _c;
+      _c = RichTextController.fromMarkdown(widget.markdown);
+      WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  /// A click: the cursor has moved to where it landed. On a link (and not
+  /// selecting), open it.
+  void _tapped() {
+    if (!_c.selection.isCollapsed) return;
+    if (_c.currentLink?.url case final url? when url.isNotEmpty) openLink(url);
+  }
+
+  @override
+  Widget build(BuildContext context) => TextField(
+    controller: _c,
+    readOnly: true,
+    maxLines: null,
+    // Never scrolls (or bounces) on its own: a swipe scrolls the page.
+    scrollPhysics: const NeverScrollableScrollPhysics(),
+    style: TextStyle(fontSize: widget.fontSize, color: context.colors.text),
+    decoration: const InputDecoration.collapsed(hintText: null),
+    onTap: _tapped,
+  );
 }
 
 /// Opens [url] in the browser (or whatever handles it).

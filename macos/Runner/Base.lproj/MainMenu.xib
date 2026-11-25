@@ -33,7 +33,11 @@
                                 </connections>
                             </menuItem>
                             <menuItem isSeparatorItem="YES" id="VOq-y0-SEH"/>
-                            <menuItem title="Preferences…" keyEquivalent="," id="BOF-NM-1cW"/>
+                            <menuItem title="Settings…" keyEquivalent="," id="BOF-NM-1cW">
+                                <connections>
+                                    <action selector="openSettings:" target="Voe-Tx-rLC" id="cdn-St-1ng"/>
+                                </connections>
+                            </menuItem>
                             <menuItem isSeparatorItem="YES" id="wFC-TO-SCJ"/>
                             <menuItem title="Services" id="NMo-om-nkz">
                                 <modifierMask key="keyEquivalentModifierMask"/>
@@ -61,6 +65,29 @@
                             <menuItem title="Quit APP_NAME" keyEquivalent="q" id="4sb-4s-VLi">
                                 <connections>
                                     <action selector="terminate:" target="-1" id="Te7-pn-YzF"/>
+                                </connections>
+                            </menuItem>
+                        </items>
+                    </menu>
+                </menuItem>
+                <menuItem title="File" id="cdn-Fl-mnu">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                    <menu key="submenu" title="File" id="cdn-Fl-sub">
+                        <items>
+                            <menuItem title="New Task" keyEquivalent="n" id="cdn-Nw-tsk">
+                                <connections>
+                                    <action selector="newTask:" target="Voe-Tx-rLC" id="cdn-Nw-ta1"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="New Personal Task" keyEquivalent="n" id="cdn-Nw-pst">
+                                <modifierMask key="keyEquivalentModifierMask" option="YES" command="YES"/>
+                                <connections>
+                                    <action selector="newPersonalTask:" target="Voe-Tx-rLC" id="cdn-Nw-ps1"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="New Project" keyEquivalent="N" id="cdn-Nw-prj">
+                                <connections>
+                                    <action selector="newProject:" target="Voe-Tx-rLC" id="cdn-Nw-pa1"/>
                                 </connections>
                             </menuItem>
                         </items>

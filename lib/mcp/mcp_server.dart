@@ -130,7 +130,7 @@ final class McpServer {
       'capabilities': {
         'tools': {'listChanged': false},
       },
-      'serverInfo': {'name': 'codename', 'version': '1.0.0'},
+      'serverInfo': {'name': 'codename', 'version': '0.4.0'},
       'instructions':
           'codename is a Kanban task app. Projects are boards with columns; '
           'tasks sit in a column and can be in several projects '

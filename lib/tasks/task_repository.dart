@@ -373,6 +373,16 @@ class TaskRepository {
     return name;
   }
 
+  /// Stores a file's [bytes] (an image, or an attachment) given as
+  /// content rather than picked, e.g. by an AI assistant; returns its
+  /// file name. [extension] is without the dot ("png").
+  Future<String> addImageBytes(List<int> bytes, String extension) async {
+    await imagesDir.create(recursive: true);
+    final name = '${newId()}.$extension';
+    await imageFile(name).writeAsBytes(bytes);
+    return name;
+  }
+
   File imageFile(String name) => File('${imagesDir.path}/$name');
 
   void deleteImage(String name) {

@@ -32,6 +32,11 @@ class _ProfileDialogState extends State<_ProfileDialog> {
   ProfileRepository get _repo => widget.profiles;
   late final Profile _profile = _repo.current!;
   late final _name = AppTextController(text: _profile.name);
+
+  /// The other profiles' list, which scrolls once it's [_othersMaxHeight]
+  /// tall.
+  final _othersScroll = ScrollController();
+  static const _othersMaxHeight = 2.5 * 44.0;
   late final _department = AppTextController(text: _profile.department);
   late final _jobTitle = AppTextController(text: _profile.jobTitle);
   late final _description = AppTextController(text: _profile.description);
@@ -42,6 +47,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
     _department.dispose();
     _jobTitle.dispose();
     _description.dispose();
+    _othersScroll.dispose();
     super.dispose();
   }
 
@@ -131,7 +137,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
                         color: context.colors.mutedText,
                       ),
                     ),
-                  for (final p in others) _otherProfile(p),
+                  if (others.isNotEmpty) _otherProfiles(others),
                   OutlinedButton.icon(
                     onPressed: _newProfile,
                     style: OutlinedButton.styleFrom(
@@ -200,6 +206,30 @@ class _ProfileDialogState extends State<_ProfileDialog> {
       style: const TextStyle(fontSize: 13.5),
       decoration: _fieldDecoration(context),
       onSubmitted: multiline ? null : (_) => _save(),
+    ),
+  );
+
+  /// The other profiles, in a box at most [_othersMaxHeight] tall that
+  /// scrolls past that, its scrollbar always showing so it's clear there's
+  /// more. (The dialog's own scroll is for a window too short for it.)
+  Widget _otherProfiles(List<Profile> others) => Container(
+    constraints: const BoxConstraints(maxHeight: _othersMaxHeight),
+    decoration: BoxDecoration(
+      border: Border.all(color: context.colors.cardBorder),
+      borderRadius: formRadius,
+    ),
+    child: ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      child: Scrollbar(
+        controller: _othersScroll,
+        thumbVisibility: true,
+        child: ListView(
+          controller: _othersScroll,
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(10, 2, 14, 2),
+          children: [for (final p in others) _otherProfile(p)],
+        ),
+      ),
     ),
   );
 

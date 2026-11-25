@@ -7,6 +7,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../profiles/profile_avatar.dart';
 import '../profiles/profiles_scope.dart';
 import '../projects/project.dart';
+import '../projects/project_dashboard.dart';
 import '../projects/project_logo.dart';
 import '../projects/project_repository.dart';
 import '../widgets/bottom_fade.dart';
@@ -21,7 +22,7 @@ import 'task_repository.dart';
 import '../app_theme.dart';
 import '../widgets/sliding_toggle.dart';
 
-enum TaskView { board, list }
+enum TaskView { board, list, dashboard }
 
 /// Width of the list view (including its side padding).
 const listMaxWidth = 1250.0;
@@ -48,10 +49,24 @@ class TasksPage extends StatefulWidget {
     required this.projectRepo,
     this.openRequest,
     this.onTaskOpened,
+    this.newTaskRequest,
+    this.onNewTaskOpened,
     this.onSearch,
+    this.onEditProject,
+    this.view = TaskView.board,
+    this.onViewChanged,
   });
 
+  /// The view to show [projectId] in (its remembered one), and where a
+  /// change of view is reported, to remember it for this project.
+  final TaskView view;
+  final ValueChanged<TaskView>? onViewChanged;
+
   final TaskRepository repo;
+
+  /// Opens the project's dialog (the dashboard's Edit description); null
+  /// for a project that can't be edited (a personal one).
+  final VoidCallback? onEditProject;
 
   /// A task to open in the editor as soon as the page shows (e.g. one
   /// clicked in Activity or found by search); [onTaskOpened] is called
@@ -59,6 +74,11 @@ class TasksPage extends StatefulWidget {
   /// task asked for again opens again.
   final ({String taskId, int serial})? openRequest;
   final VoidCallback? onTaskOpened;
+
+  /// A new task to start as soon as the page shows (File › New Task);
+  /// [onNewTaskOpened] is called once it has been. A new number each time.
+  final int? newTaskRequest;
+  final VoidCallback? onNewTaskOpened;
 
   /// Opens search: the magnifying glass in the header (⌘K too).
   final VoidCallback? onSearch;
@@ -81,7 +101,7 @@ class TasksPage extends StatefulWidget {
 }
 
 class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
-  TaskView _view = TaskView.board;
+  late TaskView _view = widget.view;
   late final Stream<List<Task>> _tasks = widget.repo.watch();
 
   /// Cards whose subtasks are shown, per project: expanding a task on one
@@ -125,14 +145,25 @@ class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
     super.initState();
     HardwareKeyboard.instance.addHandler(_onKey);
     _openRequested();
+    _newTaskRequested();
     _deferBoard();
   }
 
   @override
   void didUpdateWidget(TasksPage old) {
     super.didUpdateWidget(old);
-    if (widget.openRequest != old.openRequest) _openRequested();
-    if (widget.projectId != old.projectId) _deferBoard();
+    if (widget.openRequest != old.openRequest) {
+      // Opening a task (from Activity or search) shows its project's
+      // board, already set as its view.
+      if (widget.openRequest != null) _view = widget.view;
+      _openRequested();
+    }
+    if (widget.newTaskRequest != old.newTaskRequest) _newTaskRequested();
+    if (widget.projectId != old.projectId) {
+      // Each project opens in the view it was last left in.
+      _view = widget.view;
+      _deferBoard();
+    }
   }
 
   /// A project with more tasks than this shows a spinner for a frame
@@ -211,7 +242,19 @@ class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
     _fadeTicker.stop();
     _boardFade.value = 0;
     setState(() => _view = view);
+    widget.onViewChanged?.call(view);
     _fadeInAfterFrame(widget.projectId);
+  }
+
+  /// Starts [TasksPage.newTaskRequest]'s new task, after this frame.
+  void _newTaskRequested() {
+    final request = widget.newTaskRequest;
+    if (request == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || widget.newTaskRequest != request) return;
+      widget.onNewTaskOpened?.call();
+      _create();
+    });
   }
 
   /// Opens [TasksPage.openRequest]'s task, after this frame (once the page
@@ -506,7 +549,17 @@ class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
                     // starts fresh, scrolled to the start (not where the
                     // last one was left).
                     child: switch (_view) {
-                      TaskView.board => TaskBoard(
+                      TaskView.dashboard when _project != null =>
+                        ProjectDashboard(
+                          key: ValueKey(widget.projectId),
+                          project: _project!,
+                          tasks: snapshot.requireData,
+                          onEdit: widget.onEditProject,
+                          // The rings fill in once the page has faded in.
+                          entrance: _boardFade,
+                          projects: widget.projects,
+                        ),
+                      TaskView.board || TaskView.dashboard => TaskBoard(
                         key: ValueKey(widget.projectId),
                         tasks: tasks,
                         repo: widget.repo,
@@ -554,15 +607,17 @@ class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
             ),
           ],
         ),
-        Positioned(
-          right: fabMargin,
-          bottom: fabMargin,
-          // The small size: 40px square instead of 56.
-          child: FloatingActionButton.small(
-            onPressed: _create,
-            child: const Icon(Symbols.add),
+        // Not on the dashboard, which shows no tasks to add to.
+        if (_view != TaskView.dashboard || _project == null)
+          Positioned(
+            right: fabMargin,
+            bottom: fabMargin,
+            // The small size: 40px square instead of 56.
+            child: FloatingActionButton.small(
+              onPressed: _create,
+              child: const Icon(Symbols.add),
+            ),
           ),
-        ),
       ],
     );
   }
@@ -653,6 +708,11 @@ class _Header extends StatelessWidget {
                 value: TaskView.list,
                 icon: Symbols.view_agenda,
                 label: 'List',
+              ),
+              ToggleSegment(
+                value: TaskView.dashboard,
+                icon: Symbols.space_dashboard,
+                label: 'Dash',
               ),
             ],
             selected: view,

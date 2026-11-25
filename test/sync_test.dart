@@ -5,6 +5,7 @@ import 'package:codename/sync/app_schema.dart';
 import 'package:codename/sync/compatibility.dart';
 import 'package:codename/sync/remote_config.dart';
 import 'package:codename/sync/sync_service.dart';
+import 'package:codename/comments/comment.dart';
 import 'package:codename/tasks/task.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_engine/sync_engine.dart';
@@ -87,6 +88,14 @@ void main() {
         dueAt: at,
         createdAt: at,
         readAt: at,
+        excerpt: 'Looks good',
+      ).toJson(),
+      'comments': Comment(
+        id: 'c',
+        taskId: 't',
+        authorId: 'me',
+        body: 'Looks **good**',
+        createdAt: at,
       ).toJson(),
     };
     expect(samples.keys, unorderedEquals(appSchema.keys));

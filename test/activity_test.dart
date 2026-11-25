@@ -293,6 +293,27 @@ void main() {
       expect(activity.current('you'), hasLength(2));
     });
 
+    test('clearing many is one write: watchers hear once', () async {
+      for (var i = 0; i < 50; i++) {
+        make(assignee: 'you');
+      }
+      final ids = [for (final a in activity.current('you')) a.id];
+      var updates = 0;
+      final sub = activity.watch('you').skip(1).listen((_) => updates++);
+      await pumpEventQueue();
+      final cleared = activity.dismissMany(ids.take(30));
+      await pumpEventQueue();
+      expect(cleared, hasLength(30));
+      expect(updates, 1);
+      expect(activity.current('you'), hasLength(20));
+      // Already hidden, or unknown: skipped.
+      expect(activity.dismissMany([ids.first, 'nope']), isEmpty);
+      // Marked read too, as a single dismiss does.
+      activity.restore(cleared.take(1));
+      expect(activity.current('you').any((a) => a.id == ids.first), isTrue);
+      await sub.cancel();
+    });
+
     test('a dismissed reminder isn’t added again', () {
       final day = DateTime(2026, 11, 21);
       tasks.create(

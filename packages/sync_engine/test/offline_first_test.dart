@@ -70,6 +70,22 @@ void main() {
     expect(store.get('notes', 'n1'), isNull);
   });
 
+  test('putAll saves many records, and watchers hear once', () async {
+    final seen = <Map<String, Map<String, Object?>>>[];
+    final sub = store.watch('notes').listen(seen.add);
+    await pumpEventQueue();
+    store.putAll('notes', {
+      'n1': {'text': 'a'},
+      'n2': {'text': 'b'},
+    });
+    store.putAll('notes', {});
+    await pumpEventQueue();
+    await sub.cancel();
+    expect(seen, hasLength(2), reason: 'the first read, then one update');
+    expect(seen.last.keys, ['n1', 'n2']);
+    expect(store.pendingCount('notes', null), 2, reason: 'both sync out');
+  });
+
   test('watch emits the current records and every change', () async {
     final seen = <Map<String, Map<String, Object?>>>[];
     final sub = store.watch('notes').listen(seen.add);
