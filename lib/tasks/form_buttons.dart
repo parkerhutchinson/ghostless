@@ -7,6 +7,15 @@ import 'label_colors.dart';
 /// Text size of the task form's chips (labels, projects).
 const formChipFontSize = 12.5;
 
+/// Height of every boxed one-line field in the task form: text boxes,
+/// selects, and selects showing a pick (Column, Assignee, Due date and
+/// time, Reminder). Set through `InputDecoration.constraints` (see
+/// [formFieldConstraints]), so padding and fonts can't change it.
+const formFieldHeight = 36.0;
+
+/// [formFieldHeight] as an `InputDecoration.constraints`.
+const formFieldConstraints = BoxConstraints.tightFor(height: formFieldHeight);
+
 /// Height of the task form's chips, and of its buttons.
 const formChipHeight = 32.0;
 

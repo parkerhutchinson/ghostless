@@ -5,6 +5,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../app_theme.dart';
 import 'due_date.dart';
 import '../widgets/selected_text.dart';
+import 'form_buttons.dart';
 
 /// Faded white, like the form's placeholders.
 
@@ -82,6 +83,7 @@ InputDecoration _boxDecoration(
     color: context.colors.placeholder,
   ),
   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+  constraints: formFieldConstraints,
   enabledBorder: context.colors.fieldBorder,
   border: context.colors.fieldBorder,
   suffixIcon: Icon(icon, size: 16, color: context.colors.text),

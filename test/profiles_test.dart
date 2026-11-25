@@ -55,6 +55,23 @@ void main() {
     expect(Profile.fromJson('z', {}).name, '');
   });
 
+  test('favorites: starred in order, unstarred, per profile, saved', () {
+    profiles.create(name: 'Sam');
+    profiles
+      ..setFavorite('a', true)
+      ..setFavorite('b', true)
+      ..setFavorite('a', true);
+    expect(profiles.current!.favoriteProjects, ['a', 'b']);
+    profiles.setFavorite('a', false);
+    expect(profiles.current!.favoriteProjects, ['b']);
+    final sam = profiles.current!;
+    expect(Profile.fromJson(sam.id, sam.toJson()).favoriteProjects, ['b']);
+    // Another profile has its own.
+    profiles.create(name: 'Ana');
+    expect(profiles.current!.favoriteProjects, isEmpty);
+    expect(Profile.fromJson('x', {'name': 'Old'}).favoriteProjects, isEmpty);
+  });
+
   test('initials come from the first and last word of the name', () {
     Profile named(String name) =>
         Profile(id: 'p', name: name, createdAt: DateTime.utc(2026));

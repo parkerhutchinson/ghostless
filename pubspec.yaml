@@ -12,7 +12,10 @@ dependencies:
   file_selector: ^1.1.0
   flutter:
     sdk: flutter
+  flutter_local_notifications: ^23.0.4
   flutter_svg: ^2.5.0
+  http: ^1.6.0
+  image: ^4.13.1
   material_symbols_icons: ^4.2960.0
   material_ui: ^1.1.0
   mysql1: ^0.23.0
@@ -20,6 +23,7 @@ dependencies:
   postgres: ^3.6.0
   sync_engine:
     path: packages/sync_engine
+  timezone: ^0.11.2
   url_launcher: ^6.3.3
   window_manager: ^0.7.0
 

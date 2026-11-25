@@ -10,6 +10,7 @@ import '../profiles/profile.dart';
 import '../profiles/profile_avatar.dart';
 import '../profiles/profiles_scope.dart';
 import '../widgets/selected_text.dart';
+import 'form_buttons.dart';
 
 /// One choice in the assignee search: a person, or Unassigned (null).
 final class _Choice {
@@ -174,6 +175,7 @@ class _AssigneeFieldState extends State<AssigneeField> {
                     ),
                     // As tall as the dropdown it replaced (36 on the Mac).
                     contentPadding: const EdgeInsets.fromLTRB(0, 12.5, 8, 12.5),
+                    constraints: formFieldConstraints,
                     // The assignee's avatar (or the Unassigned icon); a
                     // magnifying glass while searching.
                     prefixIcon: Padding(

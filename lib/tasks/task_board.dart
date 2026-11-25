@@ -301,17 +301,33 @@ class _BoardColumn extends StatelessWidget {
               builder: (context, candidates, _) => Align(
                 alignment: Alignment.topCenter,
                 child: _PanelScroll(
-                  builder: (controller) => ListView(
+                  // Every card laid out, not just the ones in view (as a
+                  // ListView would): the column's height is then exact
+                  // from the start, so the scrollbar doesn't jitter. A
+                  // lazy list guesses the height of cards it hasn't laid
+                  // out yet, and cards vary a lot (images, labels,
+                  // subtasks), so its guess, and the thumb, kept changing
+                  // as it scrolled.
+                  builder: (controller) => SingleChildScrollView(
                     controller: controller,
-                    shrinkWrap: true,
                     // Room to scroll the last card up out of the fade.
                     padding: const EdgeInsets.only(bottom: bottomFadeHeight),
-                    children: [
-                      for (final task in tasks) _cardSlot(task),
-                      if (candidates.isNotEmpty) const _DropIndicator(),
-                      if (tasks.isEmpty && candidates.isEmpty)
-                        const _EmptyHint(),
-                    ],
+                    // Painted once and moved as it scrolls, instead of
+                    // every card repainted each frame. Each card is its
+                    // own layer too (as a ListView makes them), so a
+                    // card changing (hover) repaints only that card.
+                    child: RepaintBoundary(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final task in tasks)
+                            RepaintBoundary(child: _cardSlot(task)),
+                          if (candidates.isNotEmpty) const _DropIndicator(),
+                          if (tasks.isEmpty && candidates.isEmpty)
+                            const _EmptyHint(),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),

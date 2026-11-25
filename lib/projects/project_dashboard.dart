@@ -6,7 +6,9 @@ import 'package:material_ui/material_ui.dart';
 import '../app_theme.dart';
 import '../profiles/profile.dart';
 import '../profiles/profile_avatar.dart';
+import '../comments/task_comments.dart' show commentTime;
 import '../profiles/profiles_scope.dart';
+import '../reminders/reminders.dart';
 import '../tasks/rich_text/rich_text_editor.dart';
 import '../tasks/task.dart';
 import '../tasks/task_board.dart' show headerButtonFill;
@@ -52,7 +54,12 @@ class ProjectDashboard extends StatefulWidget {
     this.onEdit,
     this.entrance,
     this.projects = const [],
+    this.onOpenTask,
   });
+
+  /// Opens a task on a board (a reminder's, clicked on a personal
+  /// dashboard).
+  final void Function(Task task, String projectId)? onOpenTask;
 
   /// Every project: on a personal dashboard, the shared ones its owner
   /// has tasks in are listed with their numbers there.
@@ -172,6 +179,47 @@ class _ProjectDashboardState extends State<ProjectDashboard>
                     : _PeopleTile(stats: stats, intro: _rings),
               ),
               const SizedBox(height: _sectionGap),
+              // A personal dashboard: its owner's reminders still to go
+              // off, on any board.
+              if (project.ownerId case final owner?) ...[
+                Builder(
+                  builder: (context) {
+                    final reminders = activeReminders(
+                      tasks,
+                      profileId: owner,
+                      now: DateTime.now(),
+                    );
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _SectionHeader('Reminders', count: reminders.length),
+                        _Cells(
+                          perRow: 1,
+                          children: [
+                            if (reminders.isEmpty)
+                              const _NoReminders()
+                            else
+                              for (final r in reminders)
+                                _ReminderRow(
+                                  reminder: r,
+                                  project: widget.projects
+                                      .where((p) => p.id == r.task.originId)
+                                      .firstOrNull,
+                                  onOpen: widget.onOpenTask == null
+                                      ? null
+                                      : () => widget.onOpenTask!(
+                                          r.task,
+                                          r.task.originId,
+                                        ),
+                                ),
+                          ],
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: _sectionGap),
+              ],
               _SectionHeader(
                 'Completed by column',
                 count: stats.columns.length,
@@ -300,9 +348,16 @@ class _SectionHeader extends StatelessWidget {
 /// [_Cells]. It draws only its right and bottom edges, and the group draws
 /// the top and left, so neighbours share one line.
 class _Tile extends StatelessWidget {
-  const _Tile({required this.child, this.padding = const EdgeInsets.all(16)});
+  const _Tile({
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+    this.fill,
+  });
   final Widget child;
   final EdgeInsets padding;
+
+  /// The card shade unless given.
+  final Color? fill;
 
   @override
   Widget build(BuildContext context) {
@@ -310,7 +365,7 @@ class _Tile extends StatelessWidget {
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: context.colors.card,
+        color: fill ?? context.colors.card,
         border: Border(right: line, bottom: line),
       ),
       child: child,
@@ -617,21 +672,21 @@ class _ProfileTile extends StatelessWidget {
     if (profile == null) return const _Tile(child: SizedBox.shrink());
     return _Tile(
       padding: const EdgeInsets.all(20),
-      // Avatar and details centered in the tile's height (which is the
-      // total's, beside it).
+      // The avatar centered in the tile's height (which is the total's,
+      // beside it); the name at the top, level with "Total tasks".
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         spacing: 24,
         children: [
-          ProfileAvatar(
-            profile: profile,
-            image: scope!.imageOf(profile),
-            size: 128,
+          Center(
+            child: ProfileAvatar(
+              profile: profile,
+              image: scope!.imageOf(profile),
+              size: 128,
+            ),
           ),
           Expanded(
             child: Column(
-              // Only as tall as the text, so it centers beside the avatar.
-              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               spacing: 4,
               children: [
@@ -1158,4 +1213,105 @@ class _DescriptionViewState extends State<_DescriptionView> {
       child: RichTextView(markdown: widget.markdown),
     );
   }
+}
+
+/// One reminder on a personal dashboard: a bell, the task and its
+/// project, then when it goes off and how long before it's due. Opens the
+/// task when clicked.
+class _ReminderRow extends StatelessWidget {
+  const _ReminderRow({required this.reminder, this.project, this.onOpen});
+  final ActiveReminder reminder;
+  final Project? project;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final (:task, :at) = reminder;
+    final title = task.title.trim();
+    final project = this.project;
+    return Material(
+      color: colors.card,
+      child: InkWell(
+        onTap: onOpen,
+        hoverColor: colors.rowHover,
+        splashFactory: NoSplash.splashFactory,
+        child: _Tile(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          // Transparent over the ink, so the hover shows.
+          fill: Colors.transparent,
+          child: Row(
+            spacing: 12,
+            children: [
+              Icon(Symbols.notifications, size: 18, color: colors.text),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  spacing: 2,
+                  children: [
+                    Text(
+                      title.isEmpty ? 'Untitled task' : title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13.5, color: colors.text),
+                    ),
+                    if (project != null)
+                      Row(
+                        spacing: 6,
+                        children: [
+                          ProjectIcon.of(
+                            color: project.color,
+                            logo: project.logo,
+                            size: 12,
+                          ),
+                          Flexible(
+                            child: Text(
+                              project.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: colors.mutedText,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                spacing: 2,
+                children: [
+                  Text(
+                    commentTime(at, DateTime.now()),
+                    style: TextStyle(fontSize: 13, color: colors.text),
+                  ),
+                  Text(
+                    reminderLabel(task.reminder),
+                    style: TextStyle(fontSize: 12, color: colors.mutedText),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The Reminders section with none set.
+class _NoReminders extends StatelessWidget {
+  const _NoReminders();
+
+  @override
+  Widget build(BuildContext context) => _Tile(
+    child: Text(
+      'No reminders coming up. Set one on a task assigned to you, in the '
+      'task form under Reminder.',
+      style: TextStyle(fontSize: 12.5, color: context.colors.mutedText),
+    ),
+  );
 }

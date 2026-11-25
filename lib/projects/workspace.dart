@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:sync_engine/sync_engine.dart';
@@ -8,6 +10,8 @@ import '../activity/activity_page.dart';
 import '../activity/activity_repository.dart';
 import '../export/export_section.dart';
 import '../mcp/mcp_service.dart';
+import '../reminders/reminder_service.dart';
+import '../files/file_sync.dart';
 import '../search/search_dialog.dart';
 import '../sync/sync_service.dart';
 import '../tasks/task.dart';
@@ -41,7 +45,15 @@ class Workspace extends StatefulWidget {
     required this.activity,
     this.sync,
     this.mcp,
+    this.reminders,
+    this.files,
   });
+
+  /// Files online (Settings › Data).
+  final FileSync? files;
+
+  /// Task reminders: clicking one opens its task.
+  final ReminderService? reminders;
 
   /// The MCP server, turned on and off in Settings.
   final McpService? mcp;
@@ -95,6 +107,24 @@ class _WorkspaceState extends State<Workspace> {
     _adoptOrphans();
     // Image files of tasks deleted just before the app last quit.
     widget.tasks.deleteUnusedImages();
+    if (widget.reminders case final reminders?) {
+      _reminderClicks = reminders.opened.listen(_openReminder);
+      // The app was opened by clicking one.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (reminders.takeLaunchTask() case final id?) _openReminder(id);
+      });
+    }
+  }
+
+  StreamSubscription<String>? _reminderClicks;
+
+  /// A reminder was clicked: its task, opened on its board (where it was
+  /// created).
+  void _openReminder(String taskId) {
+    if (!mounted) return;
+    final task = widget.tasks.get(taskId);
+    if (task == null) return;
+    _openTask(task, task.originId);
   }
 
   /// Every task has an origin project. Tasks whose origin is gone (saved
@@ -112,6 +142,7 @@ class _WorkspaceState extends State<Workspace> {
 
   @override
   void dispose() {
+    _reminderClicks?.cancel();
     HardwareKeyboard.instance.removeHandler(_onKey);
     _menu.setMethodCallHandler(null);
     super.dispose();
@@ -200,6 +231,7 @@ class _WorkspaceState extends State<Workspace> {
           profiles: widget.profiles,
         ),
         mcp: widget.mcp,
+        files: widget.files,
       );
     } finally {
       _settingsOpen = false;
@@ -232,10 +264,18 @@ class _WorkspaceState extends State<Workspace> {
     _select(projectId);
   }
 
-  void _select(String? id) {
-    setState(() => _selectedId = id);
+  void _select(String? id, {bool fromFavorites = false}) {
+    setState(() {
+      _selectedId = id;
+      _selectedInFavorites = fromFavorites;
+    });
     widget.store.put(_uiCollection, _uiKey, {'projectId': id});
   }
+
+  /// The selected project was clicked under Favorites: its row there is
+  /// highlighted, not its row under Projects. Any other way of opening it
+  /// highlights it under Projects.
+  bool _selectedInFavorites = false;
 
   Future<void> _create() async {
     final result = await showProjectDialog(
@@ -406,6 +446,8 @@ class _WorkspaceState extends State<Workspace> {
                 tasks: taskSnap.requireData,
                 selectedId: selected?.id,
                 onSelect: _select,
+                onSelectFavorite: (id) => _select(id, fromFavorites: true),
+                selectedInFavorites: _selectedInFavorites,
                 onCreate: _create,
                 onEdit: _edit,
                 onDropTask: _addTask,
@@ -414,6 +456,14 @@ class _WorkspaceState extends State<Workspace> {
                   null => null,
                 },
                 onOpenSettings: _openSettings,
+                favorites: favoriteProjects(
+                  shared,
+                  profile?.favoriteProjects ?? const [],
+                ),
+                onToggleFavorite: (p) => widget.profiles.setFavorite(
+                  p.id,
+                  !(profile?.isFavorite(p.id) ?? false),
+                ),
               ),
             ),
           ),
@@ -442,6 +492,7 @@ class _WorkspaceState extends State<Workspace> {
                   projects: projects,
                   projectRepo: widget.projects,
                   openRequest: _openRequest,
+                  onOpenTask: _openTask,
                   onTaskOpened: () => _openRequest = null,
                   newTaskRequest: _newTaskRequest,
                   onNewTaskOpened: () => _newTaskRequest = null,
@@ -451,6 +502,14 @@ class _WorkspaceState extends State<Workspace> {
                   onEditProject: selected.isPersonal
                       ? null
                       : () => _edit(selected),
+                  // The star in the header; not on a personal project.
+                  favorite: profile?.isFavorite(selected.id) ?? false,
+                  onToggleFavorite: selected.isPersonal
+                      ? null
+                      : () => widget.profiles.setFavorite(
+                          selected.id,
+                          !(profile?.isFavorite(selected.id) ?? false),
+                        ),
                 ),
         ),
       ],

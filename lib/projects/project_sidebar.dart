@@ -10,6 +10,7 @@ import '../tasks/task.dart';
 import 'project.dart';
 import 'project_logo.dart';
 import '../app_theme.dart';
+import '../widgets/activity_icon.dart';
 
 /// Solid sidebar fill; the traffic lights sit on top of it.
 
@@ -34,7 +35,63 @@ class ProjectSidebar extends StatelessWidget {
     this.personal,
     this.profileImage,
     this.syncStatus,
+    this.favorites = const [],
+    this.onToggleFavorite,
+    this.onSelectFavorite,
+    this.selectedInFavorites = false,
   });
+
+  /// A project clicked under Favorites (so only that row is highlighted);
+  /// [onSelect] when null.
+  final ValueChanged<String>? onSelectFavorite;
+
+  /// The selected project was opened from Favorites: its row there is
+  /// highlighted, and its row under Projects isn't.
+  final bool selectedInFavorites;
+
+  /// The profile's starred projects, in the order starred: listed under
+  /// Favorites (and still under Projects too).
+  final List<Project> favorites;
+
+  /// The star on a project row: stars or unstars it.
+  final ValueChanged<Project>? onToggleFavorite;
+
+  bool _isFavorite(Project p) => favorites.any((f) => f.id == p.id);
+
+  /// What a project row shows on hover: its star, then its pencil.
+  Widget _rowActions(Project p) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      if (onToggleFavorite case final toggle?)
+        _StarButton(starred: _isFavorite(p), onPressed: () => toggle(p)),
+      _EditButton(onPressed: () => onEdit(p)),
+    ],
+  );
+
+  /// A shared project's row, in Favorites or Projects. Only the row
+  /// that was clicked is highlighted.
+  Widget _projectRow(Project p, {bool inFavorites = false}) => _SidebarItem(
+    key: ValueKey(p.id),
+    leading: ProjectIcon(project: p),
+    label: p.name,
+    count: _taskCount(p.id),
+    selected:
+        !activitySelected &&
+        selectedId == p.id &&
+        (inFavorites == selectedInFavorites ||
+            // Unstarred while selected from Favorites: back under Projects.
+            (!inFavorites && !_isFavorite(p))),
+    onTap: () =>
+        inFavorites ? (onSelectFavorite ?? onSelect)(p.id) : onSelect(p.id),
+    acceptsTask: (t) => !t.isIn(p.id),
+    onDropTask: (t) => onDropTask(t, p.id),
+    action: _rowActions(p),
+  );
+
+  /// Favorites taller than this many rows scroll on their own, so the
+  /// projects keep room below.
+  static const _maxFavoriteRows = 5;
+  static const _rowHeight = 34.0;
 
   /// The shared (company) projects.
   final List<Project> projects;
@@ -146,7 +203,7 @@ class ProjectSidebar extends StatelessWidget {
         children: [
           // What others did to your tasks, at the top.
           _SidebarItem(
-            leading: Icon(Symbols.notifications, size: 16),
+            leading: const ActivityIcon(size: 16),
             label: 'Activity',
             count: unreadActivity,
             countIsBadge: true,
@@ -165,6 +222,23 @@ class ProjectSidebar extends StatelessWidget {
               onTap: () => onSelect(p.id),
               acceptsTask: (t) => !t.isIn(p.id),
               onDropTask: (t) => onDropTask(t, p.id),
+            ),
+            const SizedBox(height: 12),
+          ],
+          // Starred projects, above all of them.
+          if (favorites.isNotEmpty) ...[
+            _heading(context, 'FAVORITES'),
+            ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxHeight: _maxFavoriteRows * _rowHeight,
+              ),
+              child: ListView(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                children: [
+                  for (final p in favorites) _projectRow(p, inFavorites: true),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
           ],
@@ -198,23 +272,33 @@ class ProjectSidebar extends StatelessWidget {
     );
   }
 
+  /// A section heading, like PROJECTS but with no button (as tall as
+  /// PROJECTS', whose + sets its height).
+  Widget _heading(BuildContext context, String text) => Padding(
+    padding: const EdgeInsets.fromLTRB(10, 2, 2, 4),
+    child: SizedBox(
+      height: 32,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+            color: context.colors.text,
+          ),
+        ),
+      ),
+    ),
+  );
+
   /// The shared projects, scrolling on their own.
   Widget _projectList(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
       children: [
-        for (final p in projects)
-          _SidebarItem(
-            key: ValueKey(p.id),
-            leading: ProjectIcon(project: p),
-            label: p.name,
-            count: _taskCount(p.id),
-            selected: !activitySelected && selectedId == p.id,
-            onTap: () => onSelect(p.id),
-            acceptsTask: (t) => !t.isIn(p.id),
-            onDropTask: (t) => onDropTask(t, p.id),
-            action: _EditButton(onPressed: () => onEdit(p)),
-          ),
+        for (final p in projects) _projectRow(p),
         if (projects.isEmpty)
           Padding(
             padding: EdgeInsets.fromLTRB(10, 4, 10, 0),
@@ -410,6 +494,35 @@ class _Badge extends StatelessWidget {
 /// and Delete).
 /// The side of a project row's count box and its edit button.
 const sidebarBoxSize = 22.0;
+
+/// The star on a project row: hollow to star it, filled (in the text
+/// color) once starred.
+class _StarButton extends StatelessWidget {
+  const _StarButton({required this.starred, required this.onPressed});
+  final bool starred;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(right: 2),
+    child: IconButton(
+      tooltip: starred ? 'Remove from favorites' : 'Add to favorites',
+      iconSize: 15,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(
+        width: sidebarBoxSize,
+        height: sidebarBoxSize,
+      ),
+      style: context.colors.menuButtonStyle.copyWith(
+        minimumSize: const WidgetStatePropertyAll(Size.square(sidebarBoxSize)),
+        fixedSize: const WidgetStatePropertyAll(Size.square(sidebarBoxSize)),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: onPressed,
+      icon: Icon(Symbols.star, fill: starred ? 1 : 0),
+    ),
+  );
+}
 
 class _EditButton extends StatelessWidget {
   const _EditButton({required this.onPressed});

@@ -10,8 +10,16 @@ import 'profile.dart';
 /// Reads and writes profiles (collection `profiles`, synced), and which
 /// one is using the app on this Mac (the `ui` collection, not synced).
 class ProfileRepository {
-  ProfileRepository(this._store, Directory appDirectory, this._projects)
-    : imagesDir = Directory('${appDirectory.path}/profile_images');
+  ProfileRepository(
+    this._store,
+    Directory appDirectory,
+    this._projects, {
+    this.onFileDeleted,
+  }) : imagesDir = Directory('${appDirectory.path}/profile_images');
+
+  /// A photo was deleted (by file name): online storage deletes its copy
+  /// too.
+  final void Function(String name)? onFileDeleted;
 
   static const collection = 'profiles';
   static const _ui = 'ui', _sessionKey = 'session';
@@ -96,6 +104,23 @@ class ProfileRepository {
     if (profile != null) save(profile.copyWith(theme: theme));
   }
 
+  /// Stars or unstars [projectId] for the current profile (see
+  /// [Profile.favoriteProjects]): starring adds it at the end.
+  void setFavorite(String projectId, bool favorite) {
+    final profile = current;
+    if (profile == null || profile.isFavorite(projectId) == favorite) return;
+    save(
+      profile.copyWith(
+        favoriteProjects: favorite
+            ? [...profile.favoriteProjects, projectId]
+            : [
+                for (final id in profile.favoriteProjects)
+                  if (id != projectId) id,
+              ],
+      ),
+    );
+  }
+
   /// Copies a picked image in as [profileId]'s photo, replacing (and
   /// deleting) any previous one.
   Future<Profile?> setImage(String profileId, String sourcePath) async {
@@ -133,6 +158,7 @@ class ProfileRepository {
   void _deleteImage(String name) {
     final file = imageFile(name);
     if (file.existsSync()) file.deleteSync();
+    onFileDeleted?.call(name);
   }
 
   static bool _same(Profile? a, Profile? b) =>

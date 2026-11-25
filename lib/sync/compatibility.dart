@@ -6,7 +6,7 @@ import 'app_schema.dart';
 /// that.
 const optionalFields = <String, Set<String>>{
   'projects': {'ownerId', 'logo'},
-  'tasks': {'dueDate', 'dueTime', 'assigneeId'},
+  'tasks': {'dueDate', 'dueTime', 'assigneeId', 'reminder'},
   'profiles': {'imageFile', 'personalProjectId'},
   'activity': {'actorId', 'dueAt', 'excerpt', 'readAt', 'dismissedAt'},
 };

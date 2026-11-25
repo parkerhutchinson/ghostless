@@ -141,7 +141,7 @@ class _SlidingToggleState<T> extends State<SlidingToggle<T>> {
   }
 }
 
-class _Segment<T> extends StatelessWidget {
+class _Segment<T> extends StatefulWidget {
   const _Segment({
     required this.segment,
     required this.selected,
@@ -152,7 +152,15 @@ class _Segment<T> extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_Segment<T>> createState() => _SegmentState<T>();
+}
+
+class _SegmentState<T> extends State<_Segment<T>> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
+    final _Segment(:segment, :selected, :onTap) = widget;
     final s = segment;
     // Dark on the accent, the text color off it; changing as the fill
     // slides under.
@@ -165,33 +173,43 @@ class _Segment<T> extends StatelessWidget {
       onTap: onTap,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           // On press, not release: it slides the moment it's clicked.
           onTapDown: (_) => onTap(),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: TweenAnimationBuilder<Color?>(
-              tween: ColorTween(end: color),
-              duration: SlidingToggle.duration,
-              curve: SlidingToggle.curve,
-              builder: (context, color, _) => Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                spacing: 6,
-                children: [
-                  if (s.icon case final icon?)
-                    Icon(icon, size: 16, color: color),
-                  Text(
-                    s.label,
-                    maxLines: 1,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w400,
-                      color: color,
+          // The sidebar rows' light hover shade, on the segments that
+          // aren't picked (the picked one is on the accent).
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            color: _hover && !selected
+                ? Theme.of(context).hoverColor
+                : Colors.transparent,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: TweenAnimationBuilder<Color?>(
+                tween: ColorTween(end: color),
+                duration: SlidingToggle.duration,
+                curve: SlidingToggle.curve,
+                builder: (context, color, _) => Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  spacing: 6,
+                  children: [
+                    if (s.icon case final icon?)
+                      Icon(icon, size: 16, color: color),
+                    Text(
+                      s.label,
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w400,
+                        color: color,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

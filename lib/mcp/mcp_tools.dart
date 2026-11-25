@@ -15,6 +15,7 @@ import '../tasks/task.dart';
 import '../tasks/task_repository.dart';
 import 'mcp_files.dart';
 import 'task_change_feed.dart';
+import '../tasks/image_compression.dart';
 
 /// Something a tool call got wrong (an unknown task, a bad date): told to
 /// the AI assistant so it can fix the call. Not a crash.
@@ -97,8 +98,9 @@ final class McpTools {
       title: 'List projects',
       description:
           'Lists the projects (boards), in sidebar order: id, name, whether '
-          'it is the personal project, its description (Markdown), its '
-          'columns (left to right) and how many tasks it has.',
+          'it is the personal project, whether the person using the app '
+          'starred it (favorite), its description (Markdown), its columns '
+          '(left to right) and how many tasks it has.',
       inputSchema: _object({}),
       readOnly: true,
       run: (_) => [for (final p in _projects) _projectJson(p)],
@@ -332,6 +334,7 @@ final class McpTools {
           'dueTime': _string(
             'Due time of day, HH:MM (24-hour); needs dueDate.',
           ),
+          'reminder': _reminderSchema,
           'labels': _strings(
             'Labels to put on it (each at most $maxLabelLength characters).',
           ),
@@ -355,6 +358,10 @@ final class McpTools {
         if (title.isEmpty) throw const McpToolError('The title is empty.');
         final dueDate = _day(args['dueDate']);
         final dueTime = dueDate == null ? null : _time(args['dueTime']);
+        final reminder = _reminderArg(args['reminder']);
+        if (reminder != null && dueDate == null) {
+          throw const McpToolError('Set a dueDate to have a reminder.');
+        }
         final labels = _labels(args['labels']);
         final assignee =
             // On a personal project, always its owner.
@@ -385,6 +392,7 @@ final class McpTools {
                 Subtask(id: newId(), title: s),
             ],
             assigneeId: assignee,
+            reminder: reminder,
           );
           projects.addLabels(project.id, labels);
           return _taskDetail(created);
@@ -432,6 +440,10 @@ final class McpTools {
           'dueTime': {
             'type': ['string', 'null'],
             'description': 'HH:MM (24-hour); null for no time.',
+          },
+          'reminder': {
+            ..._reminderSchema,
+            'type': ['integer', 'null'],
           },
           'labels': _strings('Its labels (replacing the ones it has).'),
           'image': {
@@ -784,6 +796,13 @@ final class McpTools {
       }
       task = task.copyWith(dueTime: _time(args['dueTime']));
     }
+    if (args.containsKey('reminder')) {
+      final reminder = _reminderArg(args['reminder']);
+      if (reminder != null && task.dueDate == null) {
+        throw const McpToolError('Set a dueDate to have a reminder.');
+      }
+      task = task.copyWith(reminder: reminder);
+    }
     if (args['labels'] != null) {
       final labels = _labels(args['labels']);
       task = task.copyWith(tags: labels);
@@ -855,7 +874,10 @@ final class McpTools {
       tasks.addImageBytes(file.bytes, file.extension);
 
   Future<List<Attachment>> _storeAttachments(List<McpFile> files) async => [
-    for (final f in files) Attachment(file: await _store(f), name: f.name),
+    for (final f in files)
+      if (await _store(f) case final stored)
+        // Named for what it's kept as (a PNG photo kept as JPEG).
+        Attachment(file: stored, name: withExtensionOf(f.name, stored)),
   ];
 
   Task _task(Map<String, Object?> args) {
@@ -927,6 +949,7 @@ final class McpTools {
     'id': p.id,
     'name': p.name,
     'personal': p.isPersonal,
+    'favorite': profiles.current?.isFavorite(p.id) ?? false,
     'description': p.description,
     'columns': [
       for (final c in p.columns) {'id': c.id, 'name': c.title},
@@ -950,6 +973,26 @@ final class McpTools {
     'dueTime': t.dueDate == null || t.dueTime == null
         ? null
         : formatStoredTime(t.dueTime!),
+    'reminder': t.dueDate == null ? null : t.reminder,
+  };
+
+  static const _reminderSchema = {
+    'type': 'integer',
+    'minimum': 0,
+    'description':
+        'Remind the assignee (a macOS notification) this many minutes '
+        'before it\'s due: 0 at the due time, 60 an hour before, 1440 a '
+        'day before. A task due any time that day counts as due at 9 AM. '
+        'Needs dueDate; null for no reminder.',
+  };
+
+  /// A reminder in minutes before, or null for none.
+  int? _reminderArg(Object? value) => switch (value) {
+    null => null,
+    final num m when m >= 0 && m == m.roundToDouble() => m.toInt(),
+    _ => throw const McpToolError(
+      'reminder must be a whole number of minutes, 0 or more.',
+    ),
   };
 
   Map<String, Object?> _taskSummary(Task t, Project board) {

@@ -126,8 +126,14 @@ final class Task {
     this.completedIn = const {},
     this.subtasks = const [],
     this.assigneeId,
+    this.reminder,
     required this.createdAt,
   });
+
+  /// When to remind its assignee, in minutes before it's due (0: when
+  /// it's due); null for no reminder. Only means something with a
+  /// [dueDate]; see `reminderAt` in `lib/reminders/reminders.dart`.
+  final int? reminder;
 
   /// The id of the profile it's assigned to, or null when nobody is.
   /// May name a profile that no longer exists (deleted, or not synced
@@ -259,6 +265,7 @@ final class Task {
     Set<String>? completedIn,
     List<Subtask>? subtasks,
     Object? assigneeId = _keep,
+    Object? reminder = _keep,
   }) => Task(
     id: id,
     title: title ?? this.title,
@@ -276,6 +283,7 @@ final class Task {
     completedIn: completedIn ?? this.completedIn,
     subtasks: subtasks ?? this.subtasks,
     assigneeId: assigneeId == _keep ? this.assigneeId : assigneeId as String?,
+    reminder: reminder == _keep ? this.reminder : reminder as int?,
     createdAt: createdAt,
   );
 
@@ -305,6 +313,8 @@ final class Task {
     },
     'subtasks': [for (final s in subtasks) s.toJson()],
     'assigneeId': assigneeId,
+    // No due date, nothing to remind about.
+    'reminder': dueDate == null ? null : reminder,
     'createdAt': createdAt.toUtc().toIso8601String(),
   };
 
@@ -358,6 +368,11 @@ final class Task {
       ],
       assigneeId: switch (json['assigneeId']) {
         final String id when id.isNotEmpty => id,
+        _ => null,
+      },
+      reminder: switch (json['reminder']) {
+        final num m when m >= 0 && parseDay(json['dueDate']) != null =>
+          m.round(),
         _ => null,
       },
       createdAt:

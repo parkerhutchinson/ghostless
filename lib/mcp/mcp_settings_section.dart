@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../app_theme.dart';
+import '../widgets/sliding_toggle.dart';
 import 'mcp_service.dart';
 
 /// The server's entry in the `mcpServers` JSON that most AI agents read
@@ -53,7 +54,6 @@ class _McpSettingsSectionState extends State<McpSettingsSection> {
   Widget build(BuildContext context) => ValueListenableBuilder<McpStatus>(
     valueListenable: _mcp.status,
     builder: (context, status, _) {
-      final scheme = Theme.of(context).colorScheme;
       final muted = TextStyle(fontSize: 13, color: context.colors.mutedText);
       final enabled = _mcp.enabled;
       Widget outlined(String label, IconData icon, VoidCallback onPressed) =>
@@ -77,33 +77,24 @@ class _McpSettingsSectionState extends State<McpSettingsSection> {
             'the token.',
             style: muted,
           ),
-          // The switch: a checkbox row (no pill-shaped switches).
-          InkWell(
-            borderRadius: formRadius,
-            onTap: () => _mcp.setEnabled(!enabled),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                spacing: 8,
-                children: [
-                  Checkbox(
-                    value: enabled,
-                    shape: formShape,
-                    activeColor: scheme.primary,
-                    checkColor: scheme.onPrimary,
-                    side: BorderSide(
-                      color: context.colors.mutedText,
-                      width: 1.5,
-                    ),
-                    onChanged: (on) => _mcp.setEnabled(on ?? false),
-                  ),
-                  Text(
-                    'Turn on the MCP server',
-                    style: TextStyle(fontSize: 14, color: context.colors.text),
-                  ),
-                ],
+          // The switch: the app's sliding toggle (no pill-shaped
+          // switches), Off / On.
+          Row(
+            spacing: 12,
+            children: [
+              Text(
+                'MCP server',
+                style: TextStyle(fontSize: 14, color: context.colors.text),
               ),
-            ),
+              SlidingToggle<bool>(
+                segments: const [
+                  ToggleSegment(value: false, label: 'Off'),
+                  ToggleSegment(value: true, label: 'On'),
+                ],
+                selected: enabled,
+                onChanged: _mcp.setEnabled,
+              ),
+            ],
           ),
           _statusLine(context, status),
           if (enabled) ...[

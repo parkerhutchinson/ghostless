@@ -20,6 +20,9 @@ import 'tasks/task_repository.dart';
 import 'traffic_lights.dart';
 import 'comments/comment_repository.dart';
 import 'comments/comments_scope.dart';
+import 'reminders/reminder_service.dart';
+import 'files/arriving_file.dart';
+import 'files/file_sync.dart';
 
 /// Shared by the window, the title bar area and the app body so they match.
 const appBackground = surfaceColor;
@@ -31,17 +34,26 @@ Future<void> main() async {
   // background when a remote is configured.
   final data = await AppData.open();
 
+  // Files (images, attachments, photos, backgrounds) online, once storage
+  // is connected in Settings; made below, once the repositories exist.
+  FileSync? files;
+
   final projects = ProjectRepository(data.store);
   // Whoever uses the app on this Mac; the first launch with profiles makes
   // one (taking over the theme picked before) along with its personal
   // project.
-  final profiles = ProfileRepository(data.store, data.directory, projects)
-    ..ensureProfile();
+  final profiles = ProfileRepository(
+    data.store,
+    data.directory,
+    projects,
+    onFileDeleted: (name) => files?.deleted('profiles/$name'),
+  )..ensureProfile();
   // The theme belongs to the current profile.
   final settings = SettingsRepository(
     data.store,
     data.directory,
     profiles: profiles,
+    onFileDeleted: (name) => files?.deleted('backgrounds/$name'),
   );
 
   final window = WindowManager.instance.getCurrent()!;
@@ -76,7 +88,24 @@ Future<void> main() async {
     columnFor: (projectId, status) =>
         projects.get(projectId)?.columnFor(status) ?? status,
     onChange: activity.recordTaskChange,
+    onFileDeleted: (name) => files?.deleted('tasks/$name'),
   );
+
+  // Every file a record refers to, by where it's kept online: tasks'
+  // images and attachments, profile photos, background images.
+  files = FileSync(
+    data.store,
+    files: () => [
+      for (final t in tasks.current())
+        for (final name in t.files)
+          (path: 'tasks/$name', file: tasks.imageFile(name)),
+      for (final p in profiles.all())
+        if (p.imageFile case final name?)
+          (path: 'profiles/$name', file: profiles.imageFile(name)),
+      for (final name in settings.backgroundImagesInUse)
+        (path: 'backgrounds/$name', file: settings.backgroundFile(name)),
+    ],
+  )..start([tasks.watch(), profiles.watch()]);
 
   // Comments on tasks; each one tells the task's assignee (Activity).
   final comments = CommentRepository(
@@ -94,6 +123,15 @@ Future<void> main() async {
 
   remind();
   Timer.periodic(const Duration(minutes: 1), (_) => remind());
+
+  // Reminders as macOS notifications, scheduled with the system so they
+  // go off even when the app is closed.
+  final reminders = ReminderService(
+    tasks: tasks,
+    projects: projects,
+    profiles: profiles,
+  );
+  unawaited(reminders.start());
 
   // The MCP server for AI assistants, if it was left on in Settings.
   final mcp = McpService(
@@ -116,6 +154,8 @@ Future<void> main() async {
       profiles: profiles,
       activity: activity,
       comments: comments,
+      reminders: reminders,
+      files: files,
       mcp: mcp,
     ),
   );
@@ -131,10 +171,14 @@ class MainApp extends StatelessWidget {
     required this.profiles,
     required this.activity,
     required this.comments,
+    this.reminders,
+    this.files,
     this.mcp,
   });
 
+  final FileSync? files;
   final CommentRepository comments;
+  final ReminderService? reminders;
 
   final McpService? mcp;
   final ProfileRepository profiles;
@@ -167,42 +211,60 @@ class MainApp extends StatelessWidget {
       // title bar area included. The image (if any) is drawn over the
       // background color, which also shows while it loads; the app's colors
       // follow the color, never the image.
-      builder: (context, child) => StreamBuilder<Background?>(
-        stream: settings.watchBackground(),
-        initialData: settings.background,
-        builder: (context, snap) {
-          final ImageProvider? image = switch (snap.data) {
-            null => null,
-            ImageBackground(:final fileName) => FileImage(
-              settings.backgroundFile(fileName),
-            ),
-          };
-          return DecoratedBox(
-            decoration: BoxDecoration(
-              color: base,
-              image: image == null
-                  ? null
-                  : DecorationImage(
-                      image: image,
-                      fit: BoxFit.cover,
-                      // Missing file (deleted outside the app): the color.
-                      onError: (_, _) {},
+      // Built again when files arrive from storage: a background picked on
+      // another Mac shows once its image is here.
+      builder: (context, child) => ValueListenableBuilder(
+        valueListenable: fileArrivals,
+        builder: (context, _, _) => StreamBuilder<Background?>(
+          stream: settings.watchBackground(),
+          initialData: settings.background,
+          builder: (context, snap) {
+            final ImageProvider? image = switch (snap.data) {
+              null => null,
+              // Not here yet (still coming from storage): the color.
+              ImageBackground(:final fileName)
+                  when !settings.backgroundFile(fileName).existsSync() =>
+                null,
+              ImageBackground(:final fileName) => FileImage(
+                settings.backgroundFile(fileName),
+              ),
+            };
+            return DecoratedBox(
+              decoration: BoxDecoration(
+                color: base,
+                image: image == null
+                    ? null
+                    : DecorationImage(
+                        image: image,
+                        fit: BoxFit.cover,
+                        // Missing file (deleted outside the app): the color.
+                        onError: (_, _) {},
+                      ),
+              ),
+              // Above the navigator, so dialogs (the task form) see it too.
+              child: BackgroundImageScope(
+                image: image,
+                child: ProfilesScope.watching(
+                  profiles,
+                  child: CommentsScope.watching(
+                    comments,
+                    me: () => profiles.current?.id,
+                    child: LabelColors.watching(
+                      projects,
+                      child: switch (reminders) {
+                        final service? => RemindersScope(
+                          service: service,
+                          child: child!,
+                        ),
+                        null => child!,
+                      },
                     ),
-            ),
-            // Above the navigator, so dialogs (the task form) see it too.
-            child: BackgroundImageScope(
-              image: image,
-              child: ProfilesScope.watching(
-                profiles,
-                child: CommentsScope.watching(
-                  comments,
-                  me: () => profiles.current?.id,
-                  child: LabelColors.watching(projects, child: child!),
+                  ),
                 ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
       home: Scaffold(
         backgroundColor: Colors.transparent,
@@ -218,6 +280,8 @@ class MainApp extends StatelessWidget {
                 settings: settings,
                 profiles: profiles,
                 activity: activity,
+                reminders: reminders,
+                files: files,
                 sync: data.sync,
                 mcp: mcp,
               ),

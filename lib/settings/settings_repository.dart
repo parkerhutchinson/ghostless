@@ -18,10 +18,19 @@ class SettingsRepository {
     this._store,
     Directory appDirectory, {
     ProfileRepository? profiles,
+    this.onFileDeleted,
   }) : _profiles = profiles, // ignore: prefer_initializing_formals
        backgroundsDir = Directory('${appDirectory.path}/backgrounds');
 
   static const _collection = 'ui', _key = 'settings';
+
+  /// A background image was deleted (by file name): online storage
+  /// deletes its copy too.
+  final void Function(String name)? onFileDeleted;
+
+  /// Background image files some profile uses (or keeps as its upload):
+  /// the ones online storage keeps.
+  Set<String> get backgroundImagesInUse => _imagesInUse();
 
   final LocalStore _store;
   final ProfileRepository? _profiles;
@@ -82,7 +91,11 @@ class SettingsRepository {
     if (!backgroundsDir.existsSync()) return;
     final keep = _imagesInUse();
     for (final file in backgroundsDir.listSync().whereType<File>()) {
-      if (!keep.contains(file.uri.pathSegments.last)) file.deleteSync();
+      final name = file.uri.pathSegments.last;
+      if (!keep.contains(name)) {
+        file.deleteSync();
+        onFileDeleted?.call(name);
+      }
     }
   }
 
@@ -156,5 +169,6 @@ class SettingsRepository {
   void _deleteFile(String name) {
     final file = backgroundFile(name);
     if (file.existsSync()) file.deleteSync();
+    onFileDeleted?.call(name);
   }
 }

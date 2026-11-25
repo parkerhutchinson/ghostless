@@ -6,6 +6,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../app_theme.dart';
 import '../projects/project.dart' show projectColors, projectHueCount;
 import 'profile.dart';
+import '../files/arriving_file.dart';
 
 /// A profile's round picture: their photo, else their initials on a color
 /// of their own, else a person icon. Circular by design (like the color
@@ -60,14 +61,17 @@ class ProfileAvatar extends StatelessWidget {
       alignment: Alignment.center,
       child: image == null
           ? fallback
-          : Image.file(
-              image!,
-              width: size,
-              height: size,
-              fit: BoxFit.cover,
-              cacheWidth: (size * 3).round(),
-              // Missing file (deleted outside the app): initials instead.
-              errorBuilder: (_, _, _) => fallback,
+          : ArrivingFile(
+              file: image!,
+              builder: (context) => Image.file(
+                image!,
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                cacheWidth: (size * 3).round(),
+                // Missing file (deleted outside the app): initials instead.
+                errorBuilder: (_, _, _) => fallback,
+              ),
             ),
     );
   }

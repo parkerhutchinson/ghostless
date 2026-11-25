@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app_theme.dart';
 import 'form_buttons.dart';
 import 'task.dart';
+import '../files/arriving_file.dart';
 
 /// Opens [file] in its own app (a PDF in Preview, say).
 Future<void> openInDefaultApp(File file) => launchUrl(Uri.file(file.path));
@@ -181,15 +182,18 @@ class _AttachmentTileState extends State<_AttachmentTile> {
   Widget build(BuildContext context) {
     final a = widget.attachment;
     final content = a.isImage
-        ? Image.file(
-            widget.file,
-            fit: BoxFit.cover,
-            cacheWidth: 400,
-            frameBuilder: (_, child, frame, syncLoaded) =>
-                frame == null && !syncLoaded
-                ? ColoredBox(color: context.colors.hover)
-                : child,
-            errorBuilder: (_, _, _) => _missing(context),
+        ? ArrivingFile(
+            file: widget.file,
+            builder: (context) => Image.file(
+              widget.file,
+              fit: BoxFit.cover,
+              cacheWidth: 400,
+              frameBuilder: (_, child, frame, syncLoaded) =>
+                  frame == null && !syncLoaded
+                  ? ColoredBox(color: context.colors.hover)
+                  : child,
+              errorBuilder: (_, _, _) => _missing(context),
+            ),
           )
         : _document(context, a);
     return MouseRegion(
@@ -385,15 +389,18 @@ class _AttachmentViewerState extends State<_AttachmentViewer> {
                     onTap: () {},
                     child: ClipRRect(
                       borderRadius: formRadius,
-                      child: Image.file(
-                        file,
-                        key: ValueKey(image.file),
-                        fit: BoxFit.contain,
-                        filterQuality: FilterQuality.medium,
-                        errorBuilder: (_, _, _) => Icon(
-                          Symbols.broken_image,
-                          size: 48,
-                          color: context.colors.mutedText,
+                      child: ArrivingFile(
+                        file: file,
+                        builder: (context) => Image.file(
+                          file,
+                          key: ValueKey(image.file),
+                          fit: BoxFit.contain,
+                          filterQuality: FilterQuality.medium,
+                          errorBuilder: (_, _, _) => Icon(
+                            Symbols.broken_image,
+                            size: 48,
+                            color: context.colors.mutedText,
+                          ),
                         ),
                       ),
                     ),

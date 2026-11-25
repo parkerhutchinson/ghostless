@@ -51,6 +51,17 @@ Rules:
   `projectStats` (`project_stats.dart`, unit tested), never worked out
   in widgets.
 
+### Form fields: one height
+
+Every boxed one-line field is the same height, **36px**
+(`formFieldHeight` in `lib/tasks/form_buttons.dart`): text inputs,
+select boxes, and selects showing a pick (the Column picker, the
+Assignee search, the due date and time, Reminder). Set it with
+`InputDecoration(constraints: formFieldConstraints)`, never with
+padding alone: padding, fonts and the Mac's compact density all change
+a field's natural height. Dropdown items stay on one line (`maxLines:
+1`, ellipsis) so a long choice can't make the box taller.
+
 ### Colors: everything follows the background color
 
 Surfaces, borders and hover shades are never hard-coded. They come from
@@ -118,6 +129,22 @@ Examples: the board columns (`task_board.dart`), the list view
 (`tasks_page.dart`), Settings, the search results and the dashboard
 (through `BottomFadeScrollView`).
 
+### Scrollbars never jitter
+
+A lazy list (`ListView`, `SliverList`) only lays out the items near the
+screen and guesses the height of the rest. When items differ in height,
+the guess (and so the scrollbar thumb) changes as it scrolls: the thumb
+jitters. This has come up twice. So:
+
+- Lists of items that vary in height (board columns: cards with images,
+  labels, subtasks) lay everything out: a `SingleChildScrollView` with a
+  `Column`, the column in a `RepaintBoundary` (and each item in one) so
+  scrolling doesn't repaint every item.
+- Long lists that must stay lazy (the list view) make every item
+  nearly the same height: one row per item, not one item per group.
+- Check with the real data: measure `maxScrollExtent` while scrolling;
+  it shouldn't change.
+
 ## Profiles
 
 Each person using the app has a profile (`lib/profiles/`, collection
@@ -135,6 +162,11 @@ personal project. Which profile is using this Mac is kept locally
   edited at all (no rename, color, logo or delete): the sidebar shows
   no edit button for them.
 - The avatar (`ProfileAvatar`) is a circle by design, like the color dots.
+- Favorite (starred) projects belong to the profile too:
+  `Profile.favoriteProjects`, in the order starred, set with
+  `ProfileRepository.setFavorite`. The sidebar lists them under
+  Favorites (via `favoriteProjects()`, which skips deleted and personal
+  ones), and they stay under Projects as well.
 - Tasks point at a profile with `Task.assigneeId` (null = unassigned; an
   id with no matching profile also shows as unassigned). Widgets look
   profiles up through `ProfilesScope.maybeOf(context)`, which sits above
@@ -156,6 +188,98 @@ form's Save.
   navigator, like `ProfilesScope`); without one it has no comments.
 - Rich text shown read only (comments, a project's description) uses
   `RichTextView`: drawn like the editor, links open on click.
+
+## Reminders
+
+A task can remind its assignee before it's due (`Task.reminder`,
+minutes before; null for none; only with a due date). They're **local**
+macOS notifications (`flutter_local_notifications`), scheduled with the
+system so they go off even when the app is closed: no server, no push.
+
+- Which reminders to schedule, when and what they say is worked out by
+  `plannedReminders` (`lib/reminders/reminders.dart`, unit tested): only
+  the current profile's assigned tasks, not checked off, still to come,
+  soonest first, at most 60 (macOS keeps 64). A task due any time that
+  day counts as due at 9 AM.
+- `ReminderService` keeps macOS's schedule in step with it whenever
+  tasks, projects or the profile change. Clicking a notification opens
+  the task on its origin board.
+- Permission is asked the first time a reminder is picked in the task
+  form (`RemindersScope`), not at launch.
+
+## Sync database (Supabase)
+
+The Postgres tables the app syncs with are created by the migrations in
+`supabase/migrations/` (Supabase CLI format: `<timestamp>_<name>.sql`).
+They mirror `appSchema` (`lib/sync/app_schema.dart`), and
+`test/supabase_migrations_test.dart` fails when the two drift.
+
+- When a model gains a synced field (anything added to `appSchema`), add
+  a **new** migration file with `alter table ... add column if not
+  exists`; never edit one that has been applied.
+- Columns are named exactly as the app's fields (camelCase, quoted).
+  Lists and objects are `jsonb`, dates and times `timestamptz`, and
+  `dueDate`/`dueTime` stay `text`. Everything but `id` is nullable.
+- Every table has `id text primary key`, `updated_at timestamptz` (written
+  by the app: no trigger may overwrite it, or last-write-wins breaks) and
+  `deleted_at timestamptz` (soft deletes, so deletes sync).
+- Row Level Security is on with no policies, so Supabase's public API
+  can't touch the tables; the app connects directly as `postgres`.
+- Apply with `supabase link --project-ref <ref>` then `supabase db push`,
+  or paste the file into the dashboard's SQL editor. In the app, use the
+  direct connection or the **session** pooler (port 5432) with SSL on,
+  not the transaction pooler (6543).
+
+## Orgs (in progress)
+
+Businesses are kept apart by orgs, enforced in the database
+(`supabase/migrations/*_orgs.sql`), never only by the app.
+
+- Everyone signs in (Supabase Auth, email + 6-digit code). Each account
+  has one **personal space** (an org of kind `personal`, just them, plan
+  `free`) and at most one **business org** (kind `business`), as
+  `owner`, `admin` or `member` (`org_members`).
+- Every synced record has an `"orgId"`. Row Level Security gives each
+  person only their orgs' records; inside an org, other people's
+  personal projects (and their tasks and comments) and other people's
+  Activity stay hidden.
+- Orgs, memberships, invites and claimed email domains change only
+  through the `public.*` functions (`ensure_personal_space`,
+  `create_business_org`, `join_org`, `invite_member`, `change_role`,
+  `remove_member`, ...), which check the caller's role; clients can't
+  write those tables.
+- Where a licensed org's data lives (`org_connections`) is the
+  owner's alone; each member's own database login
+  (`member_credentials`) is readable by that member and the owner.
+- Files in the hosted bucket (`codename`) live under `<orgId>/...`;
+  members reach their own orgs' folders only.
+- The rules are tested against a **test** Supabase project by
+  `test/supabase/orgs_rls_test.dart` (skipped without
+  `SUPABASE_TEST_*` settings, kept in the git-ignored `.env.test`).
+  Change a rule, run it.
+
+## Files online (Supabase Storage)
+
+Records only hold file names; the files themselves (task images and
+attachments, profile photos, background images) go to a private
+Supabase Storage bucket (`files`, made by the `*_file_storage.sql`
+migration), connected in Settings › Data › Files (`lib/files/`).
+
+- `FileSync` sends this Mac's files up, fetches other Macs', and deletes
+  online what's deleted here. Paths are `tasks/<file>`,
+  `profiles/<file>`, `backgrounds/<file>`. Files never change once
+  written (a new image is a new name), so each is sent and fetched once;
+  what's been sent is kept in the local `file_sync` collection (not
+  synced).
+- A new kind of file a record refers to must be added to the `files:`
+  list in `main.dart`, and its repository must report deletions
+  (`onFileDeleted`).
+- Show a local file through `ArrivingFile` (`lib/files/arriving_file.dart`),
+  never a bare `Image.file`/`FileImage`: it rebuilds the image when the
+  file arrives from storage (an image widget doesn't retry by itself).
+- The app uses the project's secret key (kept on the Mac, like the
+  database password); the bucket has no policies, so nothing else can
+  read it.
 
 ## MCP server
 

@@ -13,6 +13,9 @@ import 'settings_repository.dart';
 import '../app_theme.dart';
 import 'color_picker.dart';
 import '../widgets/sliding_toggle.dart';
+import '../files/arriving_file.dart';
+import '../files/file_sync.dart';
+import '../files/file_storage_section.dart';
 
 /// The Settings modal. Changes apply right away.
 Future<void> showSettingsDialog(
@@ -21,11 +24,17 @@ Future<void> showSettingsDialog(
   SyncService? sync,
   ExportSources? export,
   McpService? mcp,
+  FileSync? files,
 }) => showDialog<void>(
   context: context,
   barrierColor: Colors.black54,
-  builder: (_) =>
-      _SettingsDialog(settings: settings, sync: sync, export: export, mcp: mcp),
+  builder: (_) => _SettingsDialog(
+    settings: settings,
+    sync: sync,
+    export: export,
+    mcp: mcp,
+    files: files,
+  ),
 );
 
 /// The Settings window's height: the same on every tab.
@@ -40,7 +49,10 @@ class _SettingsDialog extends StatefulWidget {
     this.sync,
     this.export,
     this.mcp,
+    this.files,
   });
+
+  final FileSync? files;
   final SettingsRepository settings;
 
   /// The MCP tab; left out when null (tests).
@@ -100,7 +112,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   key: ValueKey(_tab),
                   child: switch (_tab) {
                     _Tab.theme => _theme(),
-                    _Tab.data => SyncSettingsSection(sync: widget.sync!),
+                    _Tab.data => Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      spacing: 32,
+                      children: [
+                        SyncSettingsSection(sync: widget.sync!),
+                        if (widget.files case final files?)
+                          FileStorageSection(files: files, sync: widget.sync!),
+                      ],
+                    ),
                     _Tab.export => ExportSection(sources: widget.export!),
                     _Tab.mcp => McpSettingsSection(mcp: widget.mcp!),
                   },
@@ -264,11 +284,14 @@ class _BackgroundPicker extends StatelessWidget {
             ),
             // The uploaded image, kept while No image is picked.
             if (settings.uploadedImage case final upload?)
-              _ImageTile(
-                label: 'Your image',
-                image: FileImage(settings.backgroundFile(upload)),
-                selected: current == ImageBackground(upload),
-                onTap: () => settings.setBackground(ImageBackground(upload)),
+              ArrivingFile(
+                file: settings.backgroundFile(upload),
+                builder: (context) => _ImageTile(
+                  label: 'Your image',
+                  image: FileImage(settings.backgroundFile(upload)),
+                  selected: current == ImageBackground(upload),
+                  onTap: () => settings.setBackground(ImageBackground(upload)),
+                ),
               ),
             _ChooseImageTile(onTap: _pickImage),
           ],

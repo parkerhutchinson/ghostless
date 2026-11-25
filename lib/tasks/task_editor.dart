@@ -29,6 +29,10 @@ import '../app_theme.dart';
 import '../widgets/left_menu_button.dart';
 import '../widgets/undo_snack_bar.dart';
 import '../widgets/selected_text.dart';
+import 'image_compression.dart';
+import '../reminders/reminder_service.dart';
+import '../reminders/reminders.dart';
+import '../files/arriving_file.dart';
 
 /// Opens the editor for [task], or for a new task in [status] when [task]
 /// is null. [projectId] is the project it's opened from: the task is always
@@ -238,6 +242,9 @@ class _TaskEditorState extends State<TaskEditor> {
 
   late int? _dueTime = widget.task?.dueTime;
 
+  /// Minutes before it's due to remind its assignee; null for none.
+  late int? _reminder = widget.task?.reminder;
+
   /// The subtasks as edited (saved with Save), in order.
   late final List<Subtask> _subtasks = [...?widget.task?.subtasks];
 
@@ -341,6 +348,7 @@ class _TaskEditorState extends State<TaskEditor> {
     'completed': _completed,
     'dueDate': _dueDate?.toIso8601String(),
     'dueTime': _dueTime,
+    'reminder': _dueDate == null ? null : _reminder,
     'assignee': _assignee,
     'multiHomes': _validMultiHomes,
     'labels': _labels,
@@ -489,7 +497,9 @@ class _TaskEditorState extends State<TaskEditor> {
     );
     final added = [
       for (final f in files)
-        Attachment(file: await widget.repo.addImage(f.path), name: f.name),
+        if (await widget.repo.addImage(f.path) case final stored)
+          // Named for what it's kept as (a PNG photo kept as JPEG).
+          Attachment(file: stored, name: withExtensionOf(f.name, stored)),
     ];
     if (!mounted) {
       for (final a in added) {
@@ -552,6 +562,7 @@ class _TaskEditorState extends State<TaskEditor> {
         dueTime: _dueTime,
         subtasks: subtasks,
         assigneeId: _assignee,
+        reminder: _reminder,
       );
       if (_completed) repo.save(created.withCompleted(_originId, true));
       _task = repo.get(created.id) ?? created;
@@ -579,6 +590,7 @@ class _TaskEditorState extends State<TaskEditor> {
               dueTime: _dueDate == null ? null : _dueTime,
               subtasks: subtasks,
               assigneeId: _assignee,
+              reminder: _dueDate == null ? null : _reminder,
             )
             .withCompleted(widget.projectId, _completed),
       );
@@ -713,7 +725,7 @@ class _TaskEditorState extends State<TaskEditor> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Header: Mark complete, and the ⋯ menu in the top-right
+              // Header: Mark complete, and the reminder button and ⋯ menu in the top-right
               // corner, with a line below separating it from the form. Same
               // space above and below the button.
               Container(
@@ -725,7 +737,13 @@ class _TaskEditorState extends State<TaskEditor> {
                   ),
                 ),
                 child: Row(
-                  children: [_completeButton(), const Spacer(), _menu()],
+                  spacing: 8,
+                  children: [
+                    _completeButton(),
+                    const Spacer(),
+                    _reminderButton(),
+                    _menu(),
+                  ],
                 ),
               ),
               Expanded(
@@ -1229,16 +1247,112 @@ class _TaskEditorState extends State<TaskEditor> {
       decoration: InputDecoration(
         isDense: true,
         contentPadding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+        constraints: formFieldConstraints,
         enabledBorder: context.colors.fieldBorder,
         border: context.colors.fieldBorder,
       ),
       items: [
         for (final c in _columns)
-          DropdownMenuItem(value: c.id, child: Text(c.title)),
+          DropdownMenuItem(
+            value: c.id,
+            child: Text(c.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
       ],
       onChanged: (id) => setState(() => _status = id!),
     ),
   );
+
+  /// The reminder bell beside the ⋯ menu: when to remind the assignee (a macOS
+  /// notification). On an accent square while one is set. Opens a
+  /// menu of the choices (the one set ticked), which says why when there
+  /// can't be one yet (no due date) or nobody would get it (no assignee).
+  Widget _reminderButton() {
+    final hasDue = _dueDate != null;
+    final current = hasDue ? _reminder : null;
+    final colors = context.colors;
+    final accent = Theme.of(context).colorScheme.primary;
+    // -1 stands for None in the menu (null means it was dismissed).
+    const none = -1;
+    PopupMenuEntry<int> note(String text) => PopupMenuItem<int>(
+      enabled: false,
+      height: 32,
+      child: Text(
+        text,
+        style: TextStyle(fontSize: 12, color: colors.mutedText),
+      ),
+    );
+    return PopupMenuButton<int>(
+      tooltip: current == null
+          ? 'Add reminder'
+          : 'Reminder: ${reminderLabel(current)}',
+      position: PopupMenuPosition.under,
+      constraints: const BoxConstraints(minWidth: 220),
+      color: colors.surface,
+      onSelected: (m) {
+        final picked = m == none ? null : m;
+        setState(() => _reminder = picked);
+        // macOS asks once, the first time one is set.
+        if (picked != null) {
+          RemindersScope.maybeOf(context)?.requestPermission();
+        }
+      },
+      itemBuilder: (_) => [
+        note(
+          hasDue ? 'Remind the assignee' : 'Set a due date to add a reminder',
+        ),
+        if (hasDue) ...[
+          for (final m in [null, ...reminderChoices, ?_unusualReminder])
+            PopupMenuItem<int>(
+              value: m ?? none,
+              height: 34,
+              child: Row(
+                spacing: 10,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    child: m == current
+                        ? Icon(Symbols.check, size: 16, color: colors.text)
+                        : null,
+                  ),
+                  Text(
+                    reminderLabel(m),
+                    style: TextStyle(fontSize: 13, color: colors.text),
+                  ),
+                ],
+              ),
+            ),
+          if (_assignee == null) ...[
+            const PopupMenuDivider(),
+            note('Nobody is assigned: no one will be reminded'),
+          ],
+        ],
+      ],
+      // A square the height of Mark complete, like the ⋯ button (the
+      // theme's 4px hover square).
+      iconSize: 18,
+      padding: EdgeInsets.zero,
+      // Set: on an accent square (the icon dark on it).
+      style: IconButton.styleFrom(
+        fixedSize: const Size.square(_chipHeight),
+        minimumSize: const Size.square(_chipHeight),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        backgroundColor: current == null ? null : accent,
+      ),
+      icon: Icon(
+        Symbols.notifications,
+        color: current == null
+            ? colors.text
+            : Theme.of(context).colorScheme.onPrimary,
+      ),
+    );
+  }
+
+  /// A reminder not among [reminderChoices] (set by an assistant), so the
+  /// menu can still show it.
+  int? get _unusualReminder => switch (_reminder) {
+    final m? when !reminderChoices.contains(m) => m,
+    _ => null,
+  };
 
   /// Who it's assigned to: a search field (see [AssigneeField]), as wide
   /// as the Column picker. Locked (grayed out) on a personal task: it's
@@ -1403,7 +1517,12 @@ class _TaskEditorState extends State<TaskEditor> {
               child: SizedBox(
                 width: 20,
                 height: 34,
-                child: Icon(Symbols.drag_indicator, size: 16),
+                // Faint: a secondary handle, not content.
+                child: Icon(
+                  Symbols.drag_indicator,
+                  size: 16,
+                  color: context.colors.mutedText,
+                ),
               ),
             ),
           ),
@@ -1468,24 +1587,27 @@ class _TaskEditorState extends State<TaskEditor> {
           borderRadius: formRadius,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 300),
-            child: Image.file(
-              widget.repo.imageFile(name),
-              width: double.infinity,
-              fit: BoxFit.cover,
-              cacheWidth: 1200,
-              // A gray box until it has loaded, so the area (and its
-              // buttons) never collapses to nothing.
-              frameBuilder: (_, child, frame, syncLoaded) =>
-                  frame == null && !syncLoaded
-                  ? Container(height: 160, color: context.colors.hover)
-                  : child,
-              errorBuilder: (_, _, _) => Container(
-                height: 96,
-                color: context.colors.hover,
-                child: Center(
-                  child: Icon(
-                    Symbols.broken_image,
-                    color: context.colors.mutedText,
+            child: ArrivingFile(
+              file: widget.repo.imageFile(name),
+              builder: (context) => Image.file(
+                widget.repo.imageFile(name),
+                width: double.infinity,
+                fit: BoxFit.cover,
+                cacheWidth: 1200,
+                // A gray box until it has loaded, so the area (and its
+                // buttons) never collapses to nothing.
+                frameBuilder: (_, child, frame, syncLoaded) =>
+                    frame == null && !syncLoaded
+                    ? Container(height: 160, color: context.colors.hover)
+                    : child,
+                errorBuilder: (_, _, _) => Container(
+                  height: 96,
+                  color: context.colors.hover,
+                  child: Center(
+                    child: Icon(
+                      Symbols.broken_image,
+                      color: context.colors.mutedText,
+                    ),
                   ),
                 ),
               ),

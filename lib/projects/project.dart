@@ -234,6 +234,20 @@ List<Project> projectSuggestions(Iterable<Project> projects, String query) {
   return [...starts, ...contains];
 }
 
+/// [favorites] (project ids, in the order starred) as projects, from
+/// [projects]: only the shared ones that still exist (a deleted project,
+/// or a personal one, is skipped).
+List<Project> favoriteProjects(
+  Iterable<Project> projects,
+  List<String> favorites,
+) {
+  final byId = {
+    for (final p in projects)
+      if (!p.isPersonal) p.id: p,
+  };
+  return [for (final id in favorites.toSet()) ?byId[id]];
+}
+
 /// The projects [profileId] sees: every shared project, plus their own
 /// personal one (other profiles' personal projects are hidden).
 List<Project> visibleProjects(Iterable<Project> projects, String? profileId) =>

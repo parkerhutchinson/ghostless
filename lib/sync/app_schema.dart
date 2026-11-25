@@ -63,6 +63,7 @@ const appSchema = <String, Map<String, ValueKind>>{
     'placements': ValueKind.object,
     'subtasks': ValueKind.objectList,
     'assigneeId': ValueKind.string,
+    'reminder': ValueKind.number,
     'createdAt': ValueKind.timestamp,
   },
   'profiles': {
@@ -73,6 +74,7 @@ const appSchema = <String, Map<String, ValueKind>>{
     'imageFile': ValueKind.string,
     'personalProjectId': ValueKind.string,
     'theme': ValueKind.object,
+    'favoriteProjects': ValueKind.stringList,
     'createdAt': ValueKind.timestamp,
   },
   'activity': {

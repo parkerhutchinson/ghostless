@@ -160,6 +160,28 @@ void main() {
     expect(stats[1].open, 3);
   });
 
+  test('favorites: in the order starred, only existing shared ones', () {
+    final a = Project(id: 'a', name: 'A', createdAt: created);
+    final b = Project(id: 'b', name: 'B', createdAt: created);
+    final mine = Project(
+      id: 'm',
+      name: 'Mine',
+      createdAt: created,
+      ownerId: 'me',
+    );
+    expect(
+      [
+        for (final p in favoriteProjects(
+          [a, b, mine],
+          ['b', 'gone', 'm', 'a', 'b'],
+        ))
+          p.id,
+      ],
+      ['b', 'a'],
+    );
+    expect(favoriteProjects([a, b], const []), isEmpty);
+  });
+
   test('description round-trips, and is empty by default', () {
     final withText = Project(
       id: 'p',

@@ -14,8 +14,15 @@ final class Profile {
     this.imageFile,
     this.personalProjectId,
     this.theme = const {},
+    this.favoriteProjects = const [],
     required this.createdAt,
   });
+
+  /// The projects they've starred, in the order starred: listed under
+  /// Favorites in their sidebar. Theirs alone, like the theme.
+  final List<String> favoriteProjects;
+
+  bool isFavorite(String projectId) => favoriteProjects.contains(projectId);
 
   final String id;
 
@@ -70,6 +77,7 @@ final class Profile {
     Object? imageFile = _keep,
     String? personalProjectId,
     Map<String, Object?>? theme,
+    List<String>? favoriteProjects,
   }) => Profile(
     id: id,
     name: name ?? this.name,
@@ -79,6 +87,7 @@ final class Profile {
     imageFile: imageFile == _keep ? this.imageFile : imageFile as String?,
     personalProjectId: personalProjectId ?? this.personalProjectId,
     theme: theme ?? this.theme,
+    favoriteProjects: favoriteProjects ?? this.favoriteProjects,
     createdAt: createdAt,
   );
 
@@ -90,6 +99,7 @@ final class Profile {
     'imageFile': imageFile,
     'personalProjectId': personalProjectId,
     'theme': theme,
+    'favoriteProjects': favoriteProjects,
     'createdAt': createdAt.toUtc().toIso8601String(),
   };
 
@@ -114,6 +124,9 @@ final class Profile {
       },
       _ => const {},
     },
+    favoriteProjects: [
+      ...?(json['favoriteProjects'] as List?)?.whereType<String>(),
+    ],
     createdAt:
         DateTime.tryParse(json['createdAt'] as String? ?? '') ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),

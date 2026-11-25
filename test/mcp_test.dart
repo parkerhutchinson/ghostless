@@ -269,6 +269,36 @@ void main() {
       expect(task.assigneeId, isNotNull, reason: 'not given: kept');
     });
 
+    test('reminders: set, read, cleared; need a due date', () {
+      final id =
+          (run('create_task', {
+                    'project': launch.id,
+                    'title': 'T',
+                    'dueDate': '2026-12-03',
+                    'reminder': 15,
+                  })!
+                  as Map)['id']!
+              as String;
+      expect(tasks.get(id)!.reminder, 15);
+      expect((run('get_task', {'taskId': id})! as Map)['reminder'], 15);
+      run('update_task', {'taskId': id, 'reminder': 60});
+      expect(tasks.get(id)!.reminder, 60);
+      run('update_task', {'taskId': id, 'reminder': null});
+      expect(tasks.get(id)!.reminder, isNull);
+      expect(
+        () => run('create_task', {
+          'project': launch.id,
+          'title': 'No day',
+          'reminder': 0,
+        }),
+        throwsA(isA<McpToolError>()),
+      );
+      expect(
+        () => run('update_task', {'taskId': id, 'reminder': -5}),
+        throwsA(isA<McpToolError>()),
+      );
+    });
+
     test('move_task, subtasks and search', () {
       final id =
           (run('create_task', {'project': launch.id, 'title': 'Ship it'})!

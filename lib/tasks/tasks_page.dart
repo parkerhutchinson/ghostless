@@ -11,6 +11,7 @@ import '../projects/project_dashboard.dart';
 import '../projects/project_logo.dart';
 import '../projects/project_repository.dart';
 import '../widgets/bottom_fade.dart';
+import '../settings/background.dart';
 import '../widgets/frosted_bar.dart';
 import '../widgets/undo_snack_bar.dart';
 import 'task.dart';
@@ -48,6 +49,7 @@ class TasksPage extends StatefulWidget {
     this.projects = const [],
     required this.projectRepo,
     this.openRequest,
+    this.onOpenTask,
     this.onTaskOpened,
     this.newTaskRequest,
     this.onNewTaskOpened,
@@ -55,7 +57,14 @@ class TasksPage extends StatefulWidget {
     this.onEditProject,
     this.view = TaskView.board,
     this.onViewChanged,
+    this.favorite = false,
+    this.onToggleFavorite,
   });
+
+  /// Starred by the profile using the app; the header's star toggles it
+  /// (none when null: a personal project).
+  final bool favorite;
+  final VoidCallback? onToggleFavorite;
 
   /// The view to show [projectId] in (its remembered one), and where a
   /// change of view is reported, to remember it for this project.
@@ -73,6 +82,10 @@ class TasksPage extends StatefulWidget {
   /// once it has been. Each request has its own [serial], so the same
   /// task asked for again opens again.
   final ({String taskId, int serial})? openRequest;
+
+  /// Opens a task on another board (or this one): a reminder clicked on
+  /// the dashboard.
+  final void Function(Task task, String projectId)? onOpenTask;
   final VoidCallback? onTaskOpened;
 
   /// A new task to start as soon as the page shows (File › New Task);
@@ -500,6 +513,8 @@ class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
               view: _view,
               onViewChanged: _switchView,
               onSearch: widget.onSearch,
+              favorite: widget.favorite,
+              onToggleFavorite: widget.onToggleFavorite,
             ),
             Expanded(
               child: StreamBuilder<List<Task>>(
@@ -558,6 +573,7 @@ class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
                           // The rings fill in once the page has faded in.
                           entrance: _boardFade,
                           projects: widget.projects,
+                          onOpenTask: widget.onOpenTask,
                         ),
                       TaskView.board || TaskView.dashboard => TaskBoard(
                         key: ValueKey(widget.projectId),
@@ -632,7 +648,13 @@ class _Header extends StatelessWidget {
     required this.view,
     required this.onViewChanged,
     this.onSearch,
+    this.favorite = false,
+    this.onToggleFavorite,
   });
+
+  /// The star after the title: in favorites or not.
+  final bool favorite;
+  final VoidCallback? onToggleFavorite;
 
   final String title;
 
@@ -670,6 +692,12 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // White over a background image (whatever the theme); with no image
+    // it's on the background color, so the theme's text color (dark on a
+    // light one).
+    final titleColor = BackgroundImageScope.of(context) == null
+        ? context.colors.text
+        : Colors.white;
     // On frosted glass across the pane, so the title reads over a
     // background image.
     return FrostedBar(
@@ -679,22 +707,52 @@ class _Header extends StatelessWidget {
           ?_leading(context),
           // Takes all the free space, so the view toggle sits at the far right.
           Expanded(
-            // Centering the text's line box centers capitals, but the
-            // lowercase letters sit about 2px below the middle at this
-            // size; lifted 1px, halfway between, to look centered.
-            child: Transform.translate(
-              offset: const Offset(0, -1),
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                // Always white, whatever the theme (even a light one).
-                style: const TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
+            child: Row(
+              spacing: 4,
+              children: [
+                Flexible(
+                  // Centering the text's line box centers capitals, but
+                  // the lowercase letters sit about 2px below the middle
+                  // at this size; lifted 1px, halfway between, to look
+                  // centered.
+                  child: Transform.translate(
+                    offset: const Offset(0, -1),
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w700,
+                        color: titleColor,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+                // Just after the name: star it into the sidebar's
+                // Favorites (filled once it's there). Colored like the name.
+                if (onToggleFavorite case final toggle?)
+                  IconButton(
+                    tooltip: favorite
+                        ? 'Remove from favorites'
+                        : 'Add to favorites',
+                    iconSize: 20,
+                    padding: EdgeInsets.zero,
+                    style: IconButton.styleFrom(
+                      fixedSize: const Size.square(30),
+                      minimumSize: const Size.square(30),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: toggle,
+                    icon: Icon(
+                      Symbols.star,
+                      fill: favorite ? 1 : 0,
+                      color: favorite
+                          ? titleColor
+                          : titleColor.withValues(alpha: 0.6),
+                    ),
+                  ),
+              ],
             ),
           ),
           SlidingToggle<TaskView>(

@@ -46,3 +46,8 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Local secrets (database passwords, API keys): never committed.
+.env
+.env.*
+!.env.example

@@ -5,6 +5,7 @@ import 'package:sync_engine/sync_engine.dart';
 import '../data/ids.dart';
 
 import 'task.dart';
+import 'image_compression.dart';
 
 /// Reads and writes tasks in the local store. Every method saves locally
 /// right away; syncing happens in the background.
@@ -14,6 +15,7 @@ class TaskRepository {
     Directory appDirectory, {
     String Function(String projectId, String status)? columnFor,
     this.onChange,
+    this.onFileDeleted,
   }) : imagesDir = Directory('${appDirectory.path}/images'),
        _columnFor = columnFor ?? ((_, status) => status);
 
@@ -30,6 +32,10 @@ class TaskRepository {
   final void Function(Task? before, Task? after)? onChange;
 
   final LocalStore _store;
+
+  /// A file of [imagesDir] was deleted (by name): online storage deletes
+  /// its copy too.
+  final void Function(String name)? onFileDeleted;
 
   /// Tasks' card images and attachments are copied here.
   final Directory imagesDir;
@@ -89,6 +95,7 @@ class TaskRepository {
     int? dueTime,
     List<Subtask> subtasks = const [],
     String? assigneeId,
+    int? reminder,
   }) {
     final home = _bottom(originId, status);
     final task = Task(
@@ -113,6 +120,7 @@ class TaskRepository {
       },
       subtasks: subtasks,
       assigneeId: assigneeId,
+      reminder: dueDate == null ? null : reminder,
       createdAt: DateTime.now().toUtc(),
     );
     save(task);
@@ -189,11 +197,16 @@ class TaskRepository {
     final task = get(id);
     if (task == null) return null;
     final images = [
-      for (final name in task.images) await addImage(imageFile(name).path),
+      // Already made smaller when added: copied as they are.
+      for (final name in task.images)
+        await addImage(imageFile(name).path, compress: false),
     ];
     final attachments = [
       for (final a in task.attachments)
-        Attachment(file: await addImage(imageFile(a.file).path), name: a.name),
+        Attachment(
+          file: await addImage(imageFile(a.file).path, compress: false),
+          name: a.name,
+        ),
     ];
     final copy = Task.fromJson(newId(), {
       ...task.toJson(),
@@ -237,7 +250,11 @@ class TaskRepository {
     if (!imagesDir.existsSync()) return;
     final used = {for (final t in current()) ...t.files};
     for (final file in imagesDir.listSync().whereType<File>()) {
-      if (!used.contains(file.uri.pathSegments.last)) file.deleteSync();
+      final name = file.uri.pathSegments.last;
+      if (!used.contains(name)) {
+        file.deleteSync();
+        onFileDeleted?.call(name);
+      }
     }
   }
 
@@ -363,23 +380,38 @@ class TaskRepository {
   }
 
   /// Copies a picked file (an image, or an attachment) into the app's
-  /// storage; returns its file name.
-  Future<String> addImage(String sourcePath) async {
+  /// storage; returns its file name. Images are made smaller first (see
+  /// [compressImage]), which may change their type (a PNG photo is kept
+  /// as JPEG); not with [compress] off, for a copy of one already stored.
+  Future<String> addImage(String sourcePath, {bool compress = true}) async {
     await imagesDir.create(recursive: true);
     final dot = sourcePath.lastIndexOf('.');
-    final ext = dot == -1 ? '' : sourcePath.substring(dot).toLowerCase();
-    final name = '${newId()}$ext';
+    final ext = dot == -1 ? '' : sourcePath.substring(dot + 1).toLowerCase();
+    if (compress) {
+      return addImageBytes(await File(sourcePath).readAsBytes(), ext);
+    }
+    final name = ext.isEmpty ? newId() : '${newId()}.$ext';
     await File(sourcePath).copy(imageFile(name).path);
     return name;
   }
 
   /// Stores a file's [bytes] (an image, or an attachment) given as
   /// content rather than picked, e.g. by an AI assistant; returns its
-  /// file name. [extension] is without the dot ("png").
-  Future<String> addImageBytes(List<int> bytes, String extension) async {
+  /// file name. [extension] is without the dot ("png"). Images are made
+  /// smaller first, as with [addImage].
+  Future<String> addImageBytes(
+    List<int> bytes,
+    String extension, {
+    bool compress = true,
+  }) async {
     await imagesDir.create(recursive: true);
-    final name = '${newId()}.$extension';
-    await imageFile(name).writeAsBytes(bytes);
+    final file = compress
+        ? await compressImage(bytes, extension)
+        : (bytes: bytes, extension: extension);
+    final name = file.extension.isEmpty
+        ? newId()
+        : '${newId()}.${file.extension}';
+    await imageFile(name).writeAsBytes(file.bytes);
     return name;
   }
 
@@ -388,6 +420,7 @@ class TaskRepository {
   void deleteImage(String name) {
     final file = imageFile(name);
     if (file.existsSync()) file.deleteSync();
+    onFileDeleted?.call(name);
   }
 
   static int _byOrder(Task a, Task b) => a.order != b.order

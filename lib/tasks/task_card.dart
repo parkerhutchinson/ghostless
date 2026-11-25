@@ -14,6 +14,7 @@ import 'task.dart';
 import 'task_repository.dart';
 import '../widgets/left_menu_button.dart';
 import '../widgets/truncated_text.dart';
+import '../files/arriving_file.dart';
 
 /// Line height for the text in tags and project labels: a fixed height with
 /// the extra space split evenly above and below, so the label sits in the
@@ -112,23 +113,26 @@ class _TaskCardState extends State<TaskCard> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (task.images.isNotEmpty)
-              Image.file(
-                repo.imageFile(task.images.first),
-                height: 160,
-                fit: BoxFit.cover,
-                cacheWidth: 600,
-                // A line under the image, separating it from the text.
-                // (Not on the error case, which shows nothing.)
-                frameBuilder: (_, child, _, _) => DecoratedBox(
-                  position: DecorationPosition.foreground,
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(color: context.colors.cardBorder),
+              ArrivingFile(
+                file: repo.imageFile(task.images.first),
+                builder: (context) => Image.file(
+                  repo.imageFile(task.images.first),
+                  height: 160,
+                  fit: BoxFit.cover,
+                  cacheWidth: 600,
+                  // A line under the image, separating it from the text.
+                  // (Not on the error case, which shows nothing.)
+                  frameBuilder: (_, child, _, _) => DecoratedBox(
+                    position: DecorationPosition.foreground,
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: context.colors.cardBorder),
+                      ),
                     ),
+                    child: child,
                   ),
-                  child: child,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
                 ),
-                errorBuilder: (_, _, _) => const SizedBox.shrink(),
               ),
             Padding(
               padding: const EdgeInsets.all(16),
@@ -409,6 +413,15 @@ class _TaskRowState extends State<TaskRow> {
                               subtasks: task.subtasks,
                               expanded: widget.expanded,
                               onPressed: widget.onToggleExpanded,
+                            ),
+                          // How many comments, after the subtasks' toggle
+                          // (the same badge as on the cards).
+                          if (CommentsScope.countOf(context, task.id)
+                              case final comments when comments > 0)
+                            _CountBadge(
+                              icon: Symbols.chat_bubble,
+                              count: comments,
+                              noun: 'comment',
                             ),
                         ],
                       ),
@@ -1055,9 +1068,16 @@ class _SubtaskToggleState extends State<_SubtaskToggle> {
                   widget.expanded ? Symbols.expand_more : Symbols.chevron_right,
                   size: 16,
                 ),
-                Text(
-                  '$done/${subtasks.length}',
-                  style: TextStyle(fontSize: 11.5, color: context.colors.text),
+                // Up 1px, to sit centered with the chevron.
+                Transform.translate(
+                  offset: const Offset(0, -1),
+                  child: Text(
+                    '$done/${subtasks.length}',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: context.colors.text,
+                    ),
+                  ),
                 ),
               ],
             ),
