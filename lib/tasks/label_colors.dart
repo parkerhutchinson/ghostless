@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../projects/project.dart';
 import '../projects/project_repository.dart';
+import '../widgets/watched.dart';
 
 /// The colors a label can be, by index: the project hues.
 /// (An index into this is what's stored; new hues go at the end.)
@@ -34,11 +35,11 @@ class LabelColors extends InheritedWidget {
 
   /// Keeps [child] supplied with [projects]' label colors as they change.
   static Widget watching(ProjectRepository projects, {required Widget child}) =>
-      StreamBuilder<List<Project>>(
-        stream: projects.watch(),
-        initialData: projects.current(),
-        builder: (context, snap) => LabelColors(
-          byProject: {for (final p in snap.requireData) p.id: p.labelColors},
+      Watched<List<Project>>(
+        watch: projects.watch,
+        current: projects.current,
+        builder: (context, all) => LabelColors(
+          byProject: {for (final p in all) p.id: p.labelColors},
           child: child,
         ),
       );

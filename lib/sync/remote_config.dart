@@ -254,6 +254,10 @@ final class PostgresConfig extends SqlConfig {
     settings: pg.ConnectionSettings(
       sslMode: ssl ? pg.SslMode.require : pg.SslMode.disable,
       connectTimeout: const Duration(seconds: 15),
+      // A query on a connection that died silently (the network dropped
+      // mid-sync) fails after this instead of hanging for the default 5
+      // minutes, with the sync stuck at "Syncing…" meanwhile.
+      queryTimeout: const Duration(seconds: 60),
     ),
     tables: tables(softDeletes),
   );

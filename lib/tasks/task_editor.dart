@@ -1,3 +1,5 @@
+import 'package:flutter/scheduler.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -27,6 +29,7 @@ import 'rich_text/rich_text_editor.dart';
 import 'task_repository.dart';
 import '../app_theme.dart';
 import '../widgets/left_menu_button.dart';
+import '../widgets/picker_dropdown.dart';
 import '../widgets/undo_snack_bar.dart';
 import '../widgets/selected_text.dart';
 import 'image_compression.dart';
@@ -153,9 +156,17 @@ class _EditorTransitionState extends State<_EditorTransition>
 /// Space between the form's fields.
 const _gap = 16.0;
 
+/// Extra space above and below the description (on top of [_gap]), between
+/// it and the card image and subtasks.
+const _descriptionGap = 16.0;
+
+/// How much less room there is above the description while it's not
+/// being edited.
+const _descriptionIdleLift = 30.0;
+
 /// Width of the editor panel: room for the Project and Column pickers side
 /// by side.
-const taskEditorWidth = 520.0;
+const taskEditorWidth = 600.0;
 
 /// Width of the Column and Assignee pickers: the same as the due date's
 /// box, so the three line up.
@@ -215,8 +226,14 @@ class _TaskEditorState extends State<TaskEditor> {
   );
   final _labelInput = AppTextController();
   final _labelFocus = FocusNode();
+
+  /// The Column picker's search field, and its box (closed on a pick).
+  final _columnInput = AppTextController();
+  final _columnFocus = FocusNode();
+  final _columnDropdown = GlobalKey<PickerDropdownState>();
   final _projectInput = AppTextController();
   final _projectFocus = FocusNode();
+
   late String _status = widget.task?.status ?? widget.initialStatus;
 
   /// Checked off on the board the editor was opened from.
@@ -233,11 +250,24 @@ class _TaskEditorState extends State<TaskEditor> {
   bool _onScroll(ScrollNotification n) {
     if (n.depth != 0) return false;
     if (n is ScrollStartNotification && !_scrolling) {
-      setState(() => _scrolling = true);
+      _setScrolling(true);
     } else if (n is ScrollEndNotification && _scrolling) {
-      setState(() => _scrolling = false);
+      _setScrolling(false);
     }
     return false;
+  }
+
+  /// A scroll can end during layout (the form's content changed height):
+  /// then wait for the frame to finish (setState there is an error).
+  void _setScrolling(bool value) {
+    if (SchedulerBinding.instance.schedulerPhase !=
+        SchedulerPhase.persistentCallbacks) {
+      setState(() => _scrolling = value);
+      return;
+    }
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scrolling != value) setState(() => _scrolling = value);
+    });
   }
 
   late int? _dueTime = widget.task?.dueTime;
@@ -254,7 +284,10 @@ class _TaskEditorState extends State<TaskEditor> {
   final _subtaskFocus = FocusNode();
 
   /// The subtask row under the pointer: it shows its ✕.
-  String? _hoveredSubtask;
+  /// The subtask under the pointer (its ✕ shows). A notifier, not
+  /// setState: hovering (also while dragging one past the others) must not
+  /// rebuild the whole form.
+  final _hoveredSubtask = ValueNotifier<String?>(null);
 
   TextEditingController _titleOf(Subtask s) => _subtaskTitles.putIfAbsent(
     s.id,
@@ -387,9 +420,12 @@ class _TaskEditorState extends State<TaskEditor> {
     _added.forEach(widget.repo.deleteImage);
     _savedTimer?.cancel();
     _title.dispose();
+    _hoveredSubtask.dispose();
     _description.dispose();
     _labelInput.dispose();
     _labelFocus.dispose();
+    _columnInput.dispose();
+    _columnFocus.dispose();
     _projectInput.dispose();
     _projectFocus.dispose();
     _subtaskInput.dispose();
@@ -804,10 +840,7 @@ class _TaskEditorState extends State<TaskEditor> {
                               onSubmitted: (_) => _save(),
                             ),
                           ),
-                          _section('Column', _columnPicker()),
-                          if (ProfilesScope.maybeOf(context) case final scope?)
-                            _section('Assignee', _assigneePicker(scope)),
-                          _section(
+                          _inline(
                             'Due date',
                             DueDateField(
                               date: _dueDate,
@@ -818,11 +851,14 @@ class _TaskEditorState extends State<TaskEditor> {
                               }),
                             ),
                           ),
+                          if (ProfilesScope.maybeOf(context) case final scope?)
+                            _inline('Assignee', _assigneePicker(scope)),
+                          _inline('Column', _columnPicker()),
                           // Where it was created, when it's opened from
                           // another project it's multi-homed in.
                           if (_originProject case final origin?
                               when _originId != widget.projectId)
-                            _section(
+                            _inline(
                               'Task origin',
                               Align(
                                 alignment: Alignment.centerLeft,
@@ -830,11 +866,22 @@ class _TaskEditorState extends State<TaskEditor> {
                               ),
                             ),
                           if (_otherProjects.isNotEmpty)
-                            _section('Multi-home task', _multiHomePicker()),
-                          _section(
-                            'Labels',
-                            _labelEditor(),
-                            action: _labelsButton(),
+                            _inline('Multi-home task', _multiHomePicker()),
+                          // A little extra room (8px) before the card
+                          // image.
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _inline(
+                              'Labels',
+                              _labelEditor(),
+                              action: _labelsButton(),
+                              // The chips' row (or "Add label", a field's
+                              // height): the label centres on it, whatever
+                              // the chips' height.
+                              firstLine: _labels.isEmpty
+                                  ? formFieldHeight
+                                  : LabelChip.largeHeight,
+                            ),
                           ),
                           _section(
                             'Card image',
@@ -844,18 +891,30 @@ class _TaskEditorState extends State<TaskEditor> {
                             ),
                           ),
                           // No label: the placeholder says what it's for.
-                          RichTextEditor(
-                            controller: _description,
-                            // The same size as the section labels.
-                            fontSize: _descriptionFontSize,
-                            hintText: 'Add description',
-                            // Roomier above and below than the usual 12:
-                            // 18 on the Mac, whose compact density takes 4
-                            // off these (and adds 4 to the sides, so they
-                            // stay 16).
+                          // Set further apart from the card image above and
+                          // the subtasks below than the other fields are.
+                          Padding(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 22,
+                              vertical: _descriptionGap,
+                            ),
+                            child: RichTextEditor(
+                              // 30 less room above while it's not being
+                              // edited, back as its toolbar fades in.
+                              idleLift: _descriptionIdleLift,
+                              controller: _description,
+                              // Toolbar and outline only while editing.
+                              toolsWhileEditing: true,
+                              // The same size as the section labels.
+                              fontSize: _descriptionFontSize,
+                              hintText: 'Add description',
+                              // Roomier above and below than the usual 12:
+                              // 18 on the Mac, whose compact density takes 4
+                              // off these (and adds 4 to the sides, so they
+                              // stay 16).
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 22,
+                              ),
                             ),
                           ),
                           _section('Subtasks', _subtaskEditor()),
@@ -952,6 +1011,98 @@ class _TaskEditorState extends State<TaskEditor> {
           ),
         ),
       ),
+    );
+  }
+
+  static const _labelStyle = TextStyle(
+    fontSize: 12,
+    fontWeight: FontWeight.w400,
+  );
+
+  /// The space between an inline field's label and the field.
+  static const _inlineGap = 80.0;
+
+  /// How wide the inline labels' column is: the widest of them (with the
+  /// Labels pencil), so every field starts at the same place.
+  double _inlineLabelWidth(BuildContext context) {
+    final labels = [
+      'Column',
+      'Assignee',
+      'Due date',
+      'Task origin',
+      'Multi-home task',
+    ];
+    double width(String text) {
+      final painter = TextPainter(
+        // In the app's font, as the label is drawn.
+        text: TextSpan(
+          text: text,
+          style: DefaultTextStyle.of(context).style.merge(_labelStyle),
+        ),
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout();
+      final w = painter.width;
+      painter.dispose();
+      return w;
+    }
+
+    var widest = width('Labels') + 4 + 24;
+    for (final l in labels) {
+      final w = width(l);
+      if (w > widest) widest = w;
+    }
+    return widest.ceilToDouble();
+  }
+
+  /// A field with its label on its left, centred on the field's first
+  /// line, [firstLine] tall ([formFieldHeight] unless the field's first
+  /// line is shorter, like the label chips), so the label stays put when
+  /// chips wrap onto more lines; every inline field starts the same
+  /// distance in, [_inlineGap] after the widest label.
+  Widget _inline(
+    String label,
+    Widget child, {
+    Widget? action,
+    double firstLine = formFieldHeight,
+  }) {
+    final heading = Text(
+      label,
+      style: _labelStyle.copyWith(color: context.colors.text),
+    );
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Measured where the label is drawn, in the form's font (the
+        // state's own context is above the form's text style).
+        Builder(
+          builder: (context) => SizedBox(
+            width: _inlineLabelWidth(context),
+            height: firstLine,
+            child: Row(
+              spacing: 4,
+              children: [
+                heading,
+                if (action != null)
+                  SizedBox(
+                    width: 24,
+                    child: OverflowBox(maxHeight: 24, child: action),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: _inlineGap),
+        // Loose, so a field with its own width (the pickers, the date)
+        // keeps it instead of stretching across.
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            heightFactor: 1,
+            child: child,
+          ),
+        ),
+      ],
     );
   }
 
@@ -1082,6 +1233,43 @@ class _TaskEditorState extends State<TaskEditor> {
       if (!_multiHomes.contains(p.id)) p,
   ];
 
+  /// The + after a row of chips: just the + until it's hovered (or
+  /// focused); then the chips' background and outline. [size] is the
+  /// chips' height.
+  Widget _addButton(
+    String tooltip,
+    VoidCallback onPressed, {
+    required double size,
+  }) => IconButton(
+    tooltip: tooltip,
+    onPressed: onPressed,
+    icon: Icon(Symbols.add, size: size < 24 ? 14 : 16),
+    style:
+        IconButton.styleFrom(
+          foregroundColor: context.colors.text,
+          shape: formShape,
+          fixedSize: Size.square(size),
+          minimumSize: Size.square(size),
+          padding: EdgeInsets.zero,
+        ).copyWith(
+          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+          backgroundColor: WidgetStateProperty.resolveWith(
+            (states) => _lit(states) ? context.colors.card : Colors.transparent,
+          ),
+          side: WidgetStateProperty.resolveWith(
+            (states) => _lit(states)
+                ? BorderSide(color: context.colors.formBorder)
+                : BorderSide.none,
+          ),
+        ),
+  );
+
+  /// A button that's hovered, focused or pressed.
+  static bool _lit(Set<WidgetState> states) =>
+      states.contains(WidgetState.hovered) ||
+      states.contains(WidgetState.focused) ||
+      states.contains(WidgetState.pressed);
+
   void _addProject(Project p) {
     setState(() => _multiHomes.add(p.id));
     _projectInput.clear();
@@ -1095,128 +1283,94 @@ class _TaskEditorState extends State<TaskEditor> {
   /// A project as a chip, styled like the project labels on cards and
   /// list rows: its mark, white text, a plain outline. With [onDeleted],
   /// a ✕ takes it off; without, it's read-only.
-  Widget _projectChip(Project p, {VoidCallback? onDeleted}) => InputChip(
-    label: Text(
-      p.name,
-      style: TextStyle(fontSize: _chipFontSize, color: context.colors.text),
+  Widget _projectChip(Project p, {VoidCallback? onDeleted}) => SizedBox(
+    // As tall as the form's fields.
+    height: formFieldHeight,
+    child: InputChip(
+      // The Mac's compact density would draw it shorter than the fields.
+      visualDensity: VisualDensity.standard,
+      label: Text(
+        p.name,
+        style: TextStyle(fontSize: _chipFontSize, color: context.colors.text),
+      ),
+      avatar: ProjectIcon(project: p, size: 14),
+      backgroundColor: context.colors.card,
+      side: BorderSide(color: context.colors.formBorder),
+      deleteIcon: Icon(Symbols.close, size: 14, color: context.colors.text),
+      // An empty message means no tooltip on the ✕.
+      deleteButtonTooltipMessage: '',
+      onDeleted: onDeleted,
     ),
-    avatar: ProjectIcon(project: p, size: 14),
-    backgroundColor: context.colors.card,
-    side: BorderSide(color: context.colors.formBorder),
-    deleteIcon: Icon(Symbols.close, size: 14, color: context.colors.text),
-    // An empty message means no tooltip on the ✕.
-    deleteButtonTooltipMessage: '',
-    onDeleted: onDeleted,
   );
 
-  /// Like the labels: the projects the task is also in, as chips (✕ takes it
-  /// back out), then an "Add project" box that suggests matching projects
-  /// it isn't in yet as you type. Enter adds the highlighted one.
+  /// The projects the task is also in, as chips (✕ takes it back out),
+  /// with a + in line after them; with none yet, "Add project". Either
+  /// opens a box (like the labels') with a field at the top that narrows
+  /// the projects the task isn't in yet, listed under it: click one, or
+  /// ↑ ↓ then Enter (Enter alone adds the first).
   Widget _multiHomePicker() {
-    final addable = _addableProjects;
     final added = [
       for (final p in _otherProjects)
         if (_multiHomes.contains(p.id)) p,
     ];
-    // The chips, then the field on its own line underneath.
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      spacing: 6,
-      children: [
-        if (added.isNotEmpty)
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final p in added)
-                // Styled like the project labels on cards and list rows:
-                // the project's dot, white text, a plain outline.
-                _projectChip(
-                  p,
-                  onDeleted: () => setState(() => _multiHomes.remove(p.id)),
-                ),
-            ],
-          ),
-        if (addable.isNotEmpty)
-          SizedBox(
-            width: 160,
-            child: RawAutocomplete<Project>(
-              textEditingController: _projectInput,
-              focusNode: _projectFocus,
-              optionsBuilder: (value) =>
-                  projectSuggestions(_addableProjects, value.text),
-              displayStringForOption: (p) => p.name,
-              onSelected: _addProject,
-              fieldViewBuilder: (context, controller, focus, onSubmitted) =>
-                  TextField(
-                    // Never scrolls (or bounces) on its own: a swipe over it
-                    // scrolls the form instead.
-                    scrollPhysics: const NeverScrollableScrollPhysics(),
-                    controller: controller,
-                    focusNode: focus,
+    List<Project> matches(String text) =>
+        projectSuggestions(_addableProjects, text);
+    return PickerDropdown(
+      controller: _projectInput,
+      focusNode: _projectFocus,
+      hint: 'Find project',
+      count: (text) => matches(text).length,
+      list: (context, text, highlight) {
+        final options = matches(text);
+        if (options.isEmpty) return null;
+        return PickerList(
+          itemCount: options.length,
+          itemBuilder: (context, i) => PickerItem(
+            active: i == highlight,
+            onTap: () => _addProject(options[i]),
+            child: Row(
+              spacing: 8,
+              children: [
+                ProjectIcon(project: options[i], size: 14),
+                Flexible(
+                  child: Text(
+                    options[i].name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 13),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      hintText: 'Add project',
-                      hintStyle: TextStyle(color: context.colors.placeholder),
-                      border: InputBorder.none,
-                    ),
-                    onSubmitted: (_) => onSubmitted(),
-                  ),
-              optionsViewBuilder: (context, onSelected, options) => Align(
-                alignment: Alignment.topLeft,
-                child: Material(
-                  color: context.colors.surface,
-                  elevation: 8,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: formRadius,
-                    side: BorderSide(color: context.colors.formBorder),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxHeight: 240,
-                      maxWidth: 220,
-                    ),
-                    child: ListView(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      shrinkWrap: true,
-                      children: [
-                        for (final (i, p) in options.indexed)
-                          InkWell(
-                            onTap: () => onSelected(p),
-                            child: Container(
-                              color:
-                                  AutocompleteHighlightedOption.of(context) == i
-                                  ? context.colors.hover
-                                  : null,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              child: Row(
-                                spacing: 8,
-                                children: [
-                                  ProjectIcon(project: p, size: 14),
-                                  Flexible(
-                                    child: Text(
-                                      p.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
                   ),
                 ),
-              ),
+              ],
             ),
           ),
-      ],
+        );
+      },
+      onSubmitted: (text, highlight) {
+        final options = matches(text);
+        if (options.isEmpty) return;
+        _addProject(options[highlight ?? 0]);
+      },
+      // The whole row, so the box opens under it, lined up with the chips.
+      builder: (context, toggle) => Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          for (final p in added)
+            // Styled like the project labels on cards and list rows:
+            // the project's dot, white text, a plain outline.
+            _projectChip(
+              p,
+              onDeleted: () => setState(() => _multiHomes.remove(p.id)),
+            ),
+          if (_addableProjects.isNotEmpty)
+            if (added.isEmpty)
+              PickerAddText('Add project', onPressed: toggle)
+            else
+              // As tall as the project chips beside it.
+              _addButton('Add project', toggle, size: formFieldHeight),
+        ],
+      ),
     );
   }
 
@@ -1228,39 +1382,103 @@ class _TaskEditorState extends State<TaskEditor> {
           ?.columns ??
       defaultColumns;
 
-  /// A box like the due date and time fields: same outline, padding, size
-  /// and muted icon on the right.
-  Widget _columnPicker() => SizedBox(
-    width: _pickerWidth,
-    child: DropdownButtonFormField<String>(
-      // A column deleted while the editor was open falls back to the first.
-      initialValue: _columns.any((c) => c.id == _status)
-          ? _status
-          : _columns.first.id,
-      isDense: true,
-      isExpanded: true,
-      borderRadius: formRadius,
-      dropdownColor: context.colors.surface,
-      // The same size as the label and project chips.
-      style: TextStyle(fontSize: _chipFontSize, color: context.colors.text),
-      icon: Icon(Symbols.expand_more, size: 16),
-      decoration: InputDecoration(
-        isDense: true,
-        contentPadding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
-        constraints: formFieldConstraints,
-        enabledBorder: context.colors.fieldBorder,
-        border: context.colors.fieldBorder,
-      ),
-      items: [
+  /// The column, in a box like the due date and time fields (same
+  /// outline, padding, size, a chevron on the right). Clicking it opens
+  /// the same box as the other pickers: a field at the top that narrows
+  /// the board's columns listed under it (the current one ticked); click
+  /// one, or ↑ ↓ then Enter (Enter alone picks the first). Picking one
+  /// closes it.
+  Widget _columnPicker() {
+    final colors = context.colors;
+    // A column deleted while the editor was open falls back to the first.
+    final current =
+        _columns.where((c) => c.id == _status).firstOrNull ?? _columns.first;
+    List<TaskColumn> matches(String text) {
+      final q = text.trim().toLowerCase();
+      return [
         for (final c in _columns)
-          DropdownMenuItem(
-            value: c.id,
-            child: Text(c.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          if (c.title.toLowerCase().contains(q)) c,
+      ];
+    }
+
+    void pick(TaskColumn c) {
+      setState(() => _status = c.id);
+      _columnDropdown.currentState?.close();
+    }
+
+    final style = TextStyle(fontSize: _chipFontSize, color: colors.text);
+    return PickerDropdown(
+      key: _columnDropdown,
+      controller: _columnInput,
+      focusNode: _columnFocus,
+      hint: 'Find column',
+      count: (text) => matches(text).length,
+      list: (context, text, highlight) {
+        final options = matches(text);
+        if (options.isEmpty) return null;
+        return PickerList(
+          itemCount: options.length,
+          itemBuilder: (context, i) {
+            final c = options[i];
+            return PickerItem(
+              active: i == highlight,
+              onTap: () => pick(c),
+              child: Row(
+                spacing: 4,
+                children: [
+                  Flexible(
+                    child: Text(
+                      c.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: style.copyWith(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ),
+                  // The current column: a ✓ (its text isn't bold).
+                  if (c.id == current.id)
+                    Icon(Symbols.check, size: 14, color: colors.text),
+                ],
+              ),
+            );
+          },
+        );
+      },
+      onSubmitted: (text, highlight) {
+        final options = matches(text);
+        if (options.isNotEmpty) pick(options[highlight ?? 0]);
+      },
+      builder: (context, toggle) => SizedBox(
+        width: _pickerWidth,
+        child: InkWell(
+          onTap: toggle,
+          customBorder: formShape,
+          mouseCursor: SystemMouseCursors.click,
+          child: Container(
+            height: formFieldHeight,
+            padding: const EdgeInsets.fromLTRB(12, 0, 8, 0),
+            // The fields' outline (the due date and time boxes').
+            decoration: ShapeDecoration(shape: colors.fieldBorder),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    current.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: style,
+                  ),
+                ),
+                Icon(Symbols.expand_more, size: 16, color: colors.text),
+              ],
+            ),
           ),
-      ],
-      onChanged: (id) => setState(() => _status = id!),
-    ),
-  );
+        ),
+      ),
+    );
+  }
 
   /// The reminder bell beside the ⋯ menu: when to remind the assignee (a macOS
   /// notification). On an accent square while one is set. Opens a
@@ -1362,7 +1580,6 @@ class _TaskEditorState extends State<TaskEditor> {
     final picker = AssigneeField(
       // A deleted profile shows as Unassigned until another is picked.
       assigneeId: scope.find(_assignee)?.id,
-      width: _pickerWidth,
       fontSize: _chipFontSize,
       enabled: !locked,
       onChanged: (id) => setState(() => _assigneeId = id),
@@ -1378,6 +1595,7 @@ class _TaskEditorState extends State<TaskEditor> {
   /// color), with a ✕ to take it off.
   Widget _labelChip(String label) => LabelChip(
     label,
+    large: true,
     projectId: _originId,
     // A label picked here but not saved yet: the color picked for it.
     color: switch (_newLabelColors[label.toLowerCase()]) {
@@ -1390,28 +1608,31 @@ class _TaskEditorState extends State<TaskEditor> {
     }),
   );
 
-  /// The labels as chips, then the field on its own line underneath (like
-  /// the projects). Focused, it lists the project's labels not on the
-  /// task yet (see [LabelField]).
-  Widget _labelEditor() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    spacing: 6,
-    children: [
-      if (_labels.isNotEmpty)
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [for (final label in _labels) _labelChip(label)],
-        ),
-      LabelField(
-        controller: _labelInput,
-        focusNode: _labelFocus,
-        projectId: _originId,
-        options: (text) =>
-            labelOptions(text, known: _knownLabels, chosen: _labels),
-        onAdd: _addLabels,
-      ),
-    ],
+  /// The labels as chips, with a + in line after them (like the
+  /// projects); with none yet, "Add label". Either opens a box with a field
+  /// for a new label at the top and the project's labels not on the task
+  /// yet under it (see [LabelField]).
+  Widget _labelEditor() => LabelField(
+    controller: _labelInput,
+    focusNode: _labelFocus,
+    projectId: _originId,
+    options: (text) => labelOptions(text, known: _knownLabels, chosen: _labels),
+    onAdd: _addLabels,
+    // The whole row, so the box opens under it, lined up with the labels
+    // (from the + it would hang off the form's edge).
+    builder: (context, toggle) => Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final label in _labels) _labelChip(label),
+        if (_labels.isEmpty)
+          PickerAddText('Add label', onPressed: toggle)
+        else
+          // As tall as the label chips beside it.
+          _addButton('Add label', toggle, size: LabelChip.largeHeight),
+      ],
+    ),
   );
 
   /// The subtasks, one per line: drag the handle (at the right) to
@@ -1420,25 +1641,7 @@ class _TaskEditorState extends State<TaskEditor> {
   Widget _subtaskEditor() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      if (_subtasks.isNotEmpty)
-        ReorderableListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          buildDefaultDragHandles: false,
-          itemCount: _subtasks.length,
-          // `to` is already counted without the moved subtask.
-          onReorderItem: (from, to) =>
-              setState(() => _subtasks.insert(to, _subtasks.removeAt(from))),
-          proxyDecorator: (child, _, _) => Material(
-            color: context.colors.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: formRadius,
-              side: BorderSide(color: context.colors.formBorder),
-            ),
-            child: child,
-          ),
-          itemBuilder: (context, i) => _subtaskField(i),
-        ),
+      if (_subtasks.isNotEmpty) _subtaskList(),
       // Flush left; once added (Enter), a subtask shows above with its
       // checkbox, its title moving over beside it.
       TextField(
@@ -1463,70 +1666,90 @@ class _TaskEditorState extends State<TaskEditor> {
     ],
   );
 
+  /// The subtasks, rearranged by dragging a handle: the others slide out
+  /// of the way. The dragged one looks as it does, on the form's
+  /// background, without a border.
+  Widget _subtaskList() => ReorderableListView.builder(
+    shrinkWrap: true,
+    physics: const NeverScrollableScrollPhysics(),
+    buildDefaultDragHandles: false,
+    itemCount: _subtasks.length,
+    // `to` is already counted without the moved subtask.
+    onReorderItem: (from, to) =>
+        setState(() => _subtasks.insert(to, _subtasks.removeAt(from))),
+    proxyDecorator: (child, _, _) =>
+        Material(color: context.colors.surface, child: child),
+    itemBuilder: (context, i) => _subtaskField(i),
+  );
+
   /// One subtask: checkbox, title (edited in place), then ✕ (only while
   /// the pointer is over the row) and the drag handle at the right.
   Widget _subtaskField(int i) {
     final sub = _subtasks[i];
-    final hovered = _hoveredSubtask == sub.id;
     return MouseRegion(
       key: ValueKey(sub.id),
-      onEnter: (_) => setState(() => _hoveredSubtask = sub.id),
+      onEnter: (_) => _hoveredSubtask.value = sub.id,
       onExit: (_) {
-        if (_hoveredSubtask == sub.id) setState(() => _hoveredSubtask = null);
+        if (_hoveredSubtask.value == sub.id) _hoveredSubtask.value = null;
       },
-      child: Row(
-        spacing: 6,
-        children: [
-          DoneButton(
-            done: sub.done,
-            onPressed: () =>
-                setState(() => _subtasks[i] = sub.copyWith(done: !sub.done)),
-          ),
-          Expanded(
-            child: TextField(
-              scrollPhysics: const NeverScrollableScrollPhysics(),
-              controller: _titleOf(sub),
-              style: TextStyle(
-                fontSize: _descriptionFontSize,
-                color: sub.done ? context.colors.mutedText : null,
-                decoration: sub.done ? TextDecoration.lineThrough : null,
-                decorationColor: context.colors.text,
-              ),
-              decoration: const InputDecoration(
-                isDense: true,
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(vertical: 8),
-              ),
+      // Its own layer: moving it (the slide) only shifts the layer.
+      child: RepaintBoundary(
+        child: Row(
+          spacing: 6,
+          children: [
+            DoneButton(
+              done: sub.done,
+              onPressed: () =>
+                  setState(() => _subtasks[i] = sub.copyWith(done: !sub.done)),
             ),
-          ),
-          // Its space is kept while hidden, so the title doesn't shift.
-          Visibility.maintain(
-            visible: hovered,
-            child: IconButton(
-              tooltip: 'Remove subtask',
-              iconSize: 14,
-              visualDensity: VisualDensity.compact,
-              onPressed: () => _removeSubtask(sub),
-              icon: Icon(Symbols.close),
-            ),
-          ),
-          ReorderableDragStartListener(
-            index: i,
-            child: MouseRegion(
-              cursor: SystemMouseCursors.grab,
-              child: SizedBox(
-                width: 20,
-                height: 34,
-                // Faint: a secondary handle, not content.
-                child: Icon(
-                  Symbols.drag_indicator,
-                  size: 16,
-                  color: context.colors.mutedText,
+            Expanded(
+              child: TextField(
+                scrollPhysics: const NeverScrollableScrollPhysics(),
+                controller: _titleOf(sub),
+                style: TextStyle(
+                  fontSize: _descriptionFontSize,
+                  color: sub.done ? context.colors.mutedText : null,
+                  decoration: sub.done ? TextDecoration.lineThrough : null,
+                  decorationColor: context.colors.text,
+                ),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(vertical: 8),
                 ),
               ),
             ),
-          ),
-        ],
+            // Its space is kept while hidden, so the title doesn't shift.
+            ValueListenableBuilder(
+              valueListenable: _hoveredSubtask,
+              builder: (context, hovered, child) =>
+                  Visibility.maintain(visible: hovered == sub.id, child: child!),
+              child: IconButton(
+                tooltip: 'Remove subtask',
+                iconSize: 14,
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _removeSubtask(sub),
+                icon: Icon(Symbols.close),
+              ),
+            ),
+            ReorderableDragStartListener(
+              index: i,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.grab,
+                child: SizedBox(
+                  width: 20,
+                  height: 34,
+                  // Faint: a secondary handle, not content.
+                  child: Icon(
+                    Symbols.drag_indicator,
+                    size: 16,
+                    color: context.colors.mutedText,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

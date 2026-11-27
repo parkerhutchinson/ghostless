@@ -69,14 +69,24 @@ class LocalStore implements SyncAdapter {
     return rows.isEmpty ? null : _decode(rows.first['data'] as String);
   }
 
-  /// All live records in [collection], by id.
-  Map<String, Map<String, Object?>> all(String collection) => {
-    for (final row in _db.select(
-      'SELECT id, data FROM records WHERE collection = ? AND data IS NOT NULL ORDER BY id',
-      [collection],
-    ))
-      row['id'] as String: _decode(row['data'] as String),
-  };
+  /// All live records in [collection], by id. Read and decoded once,
+  /// then the same (unmodifiable) map until the collection changes: every
+  /// watcher of it (and every caller) used to read and decode the whole
+  /// collection again on each change. Being the same object until then,
+  /// it also tells callers that nothing changed ([identical]).
+  Map<String, Map<String, Object?>> all(String collection) =>
+      _all[collection] ??= Map.unmodifiable({
+        for (final row in _db.select(
+          'SELECT id, data FROM records WHERE collection = ? AND data IS NOT NULL ORDER BY id',
+          [collection],
+        ))
+          row['id'] as String: Map<String, Object?>.unmodifiable(
+            _decode(row['data'] as String),
+          ),
+      });
+
+  /// [all], by collection; dropped on every write to it.
+  final _all = <String, Map<String, Map<String, Object?>>>{};
 
   /// Saves a record locally. Returns once it is on disk.
   void put(String collection, String id, Map<String, Object?> data) {
@@ -221,6 +231,7 @@ class LocalStore implements SyncAdapter {
     String origin, {
     bool notify = true,
   }) {
+    _all.remove(collection);
     _db.execute(
       '''
       INSERT INTO records (collection, id, data, updated_at, seq, origin)

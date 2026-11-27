@@ -10,6 +10,7 @@ import '../tasks/form_buttons.dart';
 import '../tasks/rich_text/rich_text_editor.dart';
 import 'comment.dart';
 import 'comments_scope.dart';
+import '../widgets/watched.dart';
 
 /// What a comment can be formatted with: paragraphs, bold and links.
 const commentTools = {RichTextTool.bold, RichTextTool.link};
@@ -107,11 +108,11 @@ class _TaskCommentsState extends State<TaskComments> {
       );
     }
     final me = scope.me();
-    return StreamBuilder<List<Comment>>(
-      stream: scope.repo.watch(taskId),
-      initialData: scope.repo.forTask(taskId),
-      builder: (context, snap) {
-        final comments = snap.requireData;
+    return Watched<List<Comment>>(
+      key: ValueKey(taskId),
+      watch: () => scope.repo.watch(taskId),
+      current: () => scope.repo.forTask(taskId),
+      builder: (context, comments) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           spacing: 16,

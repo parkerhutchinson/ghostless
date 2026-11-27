@@ -617,7 +617,8 @@ void main() {
       await tester.pumpAndSettle();
       final homesBefore = text('Home').evaluate().length;
       final elsewhereBefore = text('Elsewhere').evaluate().length;
-      await tester.tap(find.widgetWithText(TextField, 'Add project'));
+      // "Add project" opens the box: its field, the projects under it.
+      await tester.tap(text('Add project'));
       await tester.pumpAndSettle();
       expect(
         text('Home'),
@@ -626,7 +627,7 @@ void main() {
       );
       expect(text('Elsewhere'), findsNWidgets(elsewhereBefore + 1));
       await tester.enterText(
-        find.widgetWithText(TextField, 'Add project'),
+        find.widgetWithText(TextField, 'Find project'),
         'else',
       );
       await tester.pumpAndSettle();
@@ -634,9 +635,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.widgetWithText(InputChip, 'Elsewhere'), findsOneWidget);
       expect(
-        find.widgetWithText(TextField, 'Add project'),
+        find.byTooltip('Add project'),
         findsNothing,
-        reason: 'no other projects left to add',
+        reason: 'no other projects left to add: no +',
       );
       await tester.tap(text('Save changes'));
       await tester.pumpAndSettle();

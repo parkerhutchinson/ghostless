@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import 'app_theme.dart';
 import 'sync/sync_service.dart';
+import 'widgets/watched.dart';
 
 /// Small icon next to Settings (at the bottom of the sidebar) showing
 /// whether local data has reached the server; hover it for the details.
@@ -14,10 +15,10 @@ class SyncStatusIndicator extends StatelessWidget {
   final SyncService sync;
 
   @override
-  Widget build(BuildContext context) => StreamBuilder<SyncConnection?>(
-    stream: sync.watch(),
-    initialData: sync.current,
-    builder: (context, snap) => switch (snap.data) {
+  Widget build(BuildContext context) => Watched<SyncConnection?>(
+    watch: sync.watch,
+    current: () => sync.current,
+    builder: (context, connection) => switch (connection) {
       null => const _Status(Symbols.cloud_off, 'Local only'),
       final c => _connected(c.controller, c.config.kind.label),
     },
@@ -39,7 +40,8 @@ class SyncStatusIndicator extends StatelessWidget {
           ),
           SyncPhase.offline => _Status(
             Symbols.cloud_off,
-            'Can’t reach $name$pending\n${s.lastError}',
+            'Can’t reach $name$pending\n'
+            '${retrying(s.retryIn)}\n${s.lastError}',
           ),
           SyncPhase.idle => _Status(
             pending.isEmpty ? Symbols.cloud_done : Symbols.cloud_upload,

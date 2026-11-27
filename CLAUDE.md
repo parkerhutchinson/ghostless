@@ -23,8 +23,9 @@ Rules:
 - Icon-only buttons (+, ✕, ⋯, arrows) use it too: their hover and press
   highlight is a 4px rounded square, never a circle (set app-wide via
   `iconButtonTheme`).
-- Exceptions: things that are truly circular by design (the done checkbox,
-  avatars) stay circles. A project's color mark is a 4px rounded square
+- Exceptions: things that are truly circular by design (avatars) stay
+  circles. The done checkbox is a 4px rounded square like everything
+  else. A project's color mark is a 4px rounded square
   (`ProjectIcon` in `lib/projects/project_logo.dart`), with its logo on
   it when it has one.
 - One exception: a whole board column being dragged (its drag feedback
@@ -137,13 +138,82 @@ the guess (and so the scrollbar thumb) changes as it scrolls: the thumb
 jitters. This has come up twice. So:
 
 - Lists of items that vary in height (board columns: cards with images,
-  labels, subtasks) lay everything out: a `SingleChildScrollView` with a
-  `Column`, the column in a `RepaintBoundary` (and each item in one) so
-  scrolling doesn't repaint every item.
+  labels, subtasks) give every item its real height but build only the
+  ones near the view: `_CardList` in `task_board.dart` (a
+  `Column` in a `CustomScrollView`; off-screen cards are empty boxes
+  of their last measured height, kept across projects; cards never
+  measured are built a few per frame after the board opens). Never build every item: anything that
+  rebuilds them all (a theme change, every frame of its animation) then
+  costs as much as the whole list, and big projects lag.
+- Don't use a `SingleChildScrollView` for anything that scrolls on
+  the Mac: whenever it's laid out again (a hover changing under the
+  pointer is enough) it snaps back from the stretch past the end, so
+  the scrollbar jumps. Use a `CustomScrollView` (`shrinkWrap: true`)
+  with a `SliverToBoxAdapter`, as the board columns and
+  `BottomFadeScrollView` do.
 - Long lists that must stay lazy (the list view) make every item
   nearly the same height: one row per item, not one item per group.
 - Check with the real data: measure `maxScrollExtent` while scrolling;
   it shouldn't change.
+
+## Performance: smooth at any size
+
+Every change must stay smooth with thousands of tasks, without being
+asked. Check this as part of the work, not after a complaint. The
+Stress Test project (thousands of tasks) is the yardstick for anything
+touching boards, lists, the sidebar, dialogs or animations.
+
+- **Never read the store in `build`.** No `repo.current()`,
+  `inProject()`, `viewsIn()`, `activity.current()` and the like in a
+  build method, **including as an argument** (`StreamBuilder`'s
+  `initialData`, a widget's parameter): Dart evaluates it on every
+  rebuild even when it's thrown away, and each call decodes every
+  record. Read once in the State (`late final`) or compute when the
+  data actually changes.
+- **Make streams once.** `repo.watch()` in `build` gives a new stream
+  each time, so a `StreamBuilder` unsubscribes, subscribes again and
+  starts over (and can set off more rebuilds). Keep them in `late
+  final` fields, or one per key (per profile, per project).
+  For stored data, use `Watched` (`lib/widgets/watched.dart`):
+  `Watched(watch: repo.watch, current: repo.current, builder: ...)`
+  calls both once; give it a key when what it watches changes.
+- **Opening or closing something on top doesn't rebuild what's
+  under it.** A dialog, panel, menu or form opening or closing may
+  rebuild itself and the one thing it highlights, not the page, the
+  board or the sidebar. Use a `ValueNotifier` and a small listener for
+  "which task is open" style state, never `setState` on the page.
+- **No big re-layout during an animation.** While a route slides in
+  or out, nothing else may animate size or position across a large
+  subtree (a whole form, a board): freeze such animations while the
+  route isn't current (see `RichTextEditor`), and start scrolls or
+  other follow-ups after the transition (see `_CardList._onOpenTask`).
+- **Long lists build only what's near the screen** (see "Scrollbars
+  never jitter" above); never build every item. Off-screen items are
+  one spacer per run (heights added up), not a widget each, and work
+  done in the background (measuring cards) waits until the board has
+  faded in and is capped per frame for the whole board.
+- **Decoding is shared.** `LocalStore.all` returns the same
+  unmodifiable map until the collection changes, and repositories
+  decode it once per change (`TaskRepository._visible`,
+  `ActivityRepository._all`, keyed on `identical`). Don't mutate what
+  they return; copy it.
+- **Measure, don't guess.** When something might be slow, time the
+  frames: in a widget test with the stress DB (time each `pump`, count
+  rebuilds with `debugOnRebuildDirtyWidget`), and for the real thing,
+  the running app's timeline through its VM service
+  (`Animator::BeginFrame` for the UI thread, `Rasterizer::DoDraw` for
+  drawing) plus `getCpuSamples` for what's slow. Aim for every frame
+  under 16ms in this debug build, apart from the one frame that
+  builds something new (a form opening), which must stay well under
+  50ms. Report the numbers before and after. Startup and first-run
+  numbers come from a profile build (`flutter run --profile
+  --endless-trace-buffer`): a debug build compiles code as it first
+  runs, so its first seconds are several times slower than the real
+  app.
+- **Clean up after driving the app.** Clicks simulated in the running
+  app through the VM service add mouse devices; they stay (hovering
+  whatever passes under them) until removed with a
+  `PointerRemovedEvent`. Hot restart the app when done.
 
 ## Profiles
 
@@ -253,6 +323,15 @@ Businesses are kept apart by orgs, enforced in the database
   (`member_credentials`) is readable by that member and the owner.
 - Files in the hosted bucket (`codename`) live under `<orgId>/...`;
   members reach their own orgs' folders only.
+- Signing in (`lib/account/`): `AccountService` (unit tested with a fake
+  `AuthBackend`) and the `SignInPage`, the app's only screen while
+  signed out. Offline-first: the account and session are kept in the
+  local `ui` collection, so the app opens straight away without a
+  connection; only the service refusing the session signs the Mac out.
+  The Mac's data belongs to the first account that signs in on it
+  (`ui/macOwner`); another account is refused until data is kept per
+  account. The hosted service's URL and publishable key are in
+  `HostedService` (never a secret key).
 - The rules are tested against a **test** Supabase project by
   `test/supabase/orgs_rls_test.dart` (skipped without
   `SUPABASE_TEST_*` settings, kept in the git-ignored `.env.test`).

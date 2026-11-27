@@ -101,6 +101,9 @@ class SyncService {
     final controller = SyncController(
       engine: engine,
       store: _store,
+      // Back within half a minute of the network returning (the default
+      // waits up to 5).
+      maxBackoff: const Duration(seconds: 30),
       pipeline: SyncPipeline(
         // Progress is kept per database: a different one starts afresh.
         id: 'remote/${config.identity}',
@@ -139,4 +142,12 @@ class SyncService {
     await _stop();
     await _changes.close();
   }
+}
+
+/// When it'll try to sync again after failing: "Trying again in 8
+/// seconds." (it keeps trying on its own, at most half a minute apart).
+String retrying(Duration? retryIn) {
+  if (retryIn == null) return 'Trying again shortly.';
+  final s = retryIn.inSeconds;
+  return s <= 1 ? 'Trying again in a second.' : 'Trying again in $s seconds.';
 }

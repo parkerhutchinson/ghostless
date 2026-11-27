@@ -24,6 +24,7 @@ final class SyncStatus {
     this.pending = 0,
     this.lastSyncedAt,
     this.lastError,
+    this.retryIn,
   });
 
   final SyncPhase phase;
@@ -32,6 +33,10 @@ final class SyncStatus {
   final int pending;
   final DateTime? lastSyncedAt;
   final Object? lastError;
+
+  /// When [SyncPhase.offline]: how long until it tries again (on its
+  /// own; [SyncController.syncNow] tries straight away).
+  final Duration? retryIn;
 
   @override
   String toString() =>
@@ -157,6 +162,7 @@ class SyncController {
           pending: await _pending(),
           lastSyncedAt: _current.lastSyncedAt,
           lastError: e,
+          retryIn: delay,
         ),
       );
       return null;
@@ -181,6 +187,7 @@ class SyncController {
           pending: pending,
           lastSyncedAt: _current.lastSyncedAt,
           lastError: _current.lastError,
+          retryIn: _current.retryIn,
         ),
       );
     }

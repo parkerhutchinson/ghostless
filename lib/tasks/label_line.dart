@@ -33,7 +33,7 @@ int chipsThatFit(
 
 /// A list row's labels on one line: as many as fit, then "+N" for the
 /// rest. Hovering shows them all in a bubble (only when some are hidden).
-class LabelLine extends StatefulWidget {
+class LabelLine extends StatelessWidget {
   const LabelLine({super.key, required this.tags, required this.projectId});
 
   final List<String> tags;
@@ -42,10 +42,24 @@ class LabelLine extends StatefulWidget {
   final String? projectId;
 
   @override
-  State<LabelLine> createState() => _LabelLineState();
+  Widget build(BuildContext context) => ChipLine(
+    chips: [for (final tag in tags) LabelChip(tag, projectId: projectId)],
+  );
 }
 
-class _LabelLineState extends State<LabelLine> {
+/// [chips] on one line (a list row's labels, its other projects): as many
+/// as fit, then "+N" for the rest; hovering shows them all in a bubble
+/// (only when some are hidden). Only one, too long: it's cut short.
+class ChipLine extends StatefulWidget {
+  const ChipLine({super.key, required this.chips});
+
+  final List<Widget> chips;
+
+  @override
+  State<ChipLine> createState() => _ChipLineState();
+}
+
+class _ChipLineState extends State<ChipLine> {
   /// Some don't fit: the bubble is offered.
   bool _cut = false;
 
@@ -59,10 +73,7 @@ class _LabelLineState extends State<LabelLine> {
 
   @override
   Widget build(BuildContext context) {
-    final chips = [
-      for (final tag in widget.tags)
-        LabelChip(tag, projectId: widget.projectId),
-    ];
+    final chips = widget.chips;
     return HoverPopover(
       enabled: _cut,
       popover: Wrap(spacing: 4, runSpacing: 4, children: chips),

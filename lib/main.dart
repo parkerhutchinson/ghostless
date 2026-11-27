@@ -20,6 +20,9 @@ import 'tasks/task_repository.dart';
 import 'traffic_lights.dart';
 import 'comments/comment_repository.dart';
 import 'comments/comments_scope.dart';
+import 'account/account_service.dart';
+import 'account/auth_backend.dart';
+import 'account/sign_in_page.dart';
 import 'reminders/reminder_service.dart';
 import 'files/arriving_file.dart';
 import 'files/file_sync.dart';
@@ -126,6 +129,15 @@ Future<void> main() async {
 
   // Reminders as macOS notifications, scheduled with the system so they
   // go off even when the app is closed.
+  // Who's signed in (an account is always needed). Offline-first: a kept
+  // session opens the app straight away, refreshed when online.
+  final accounts = AccountService(
+    data.store,
+    SupabaseAuthBackend(),
+    profileId: () => profiles.current?.id,
+    profileName: () => profiles.current?.displayName ?? '',
+  )..start();
+
   final reminders = ReminderService(
     tasks: tasks,
     projects: projects,
@@ -156,6 +168,7 @@ Future<void> main() async {
       comments: comments,
       reminders: reminders,
       files: files,
+      accounts: accounts,
       mcp: mcp,
     ),
   );
@@ -173,9 +186,11 @@ class MainApp extends StatelessWidget {
     required this.comments,
     this.reminders,
     this.files,
+    required this.accounts,
     this.mcp,
   });
 
+  final AccountService accounts;
   final FileSync? files;
   final CommentRepository comments;
   final ReminderService? reminders;
@@ -273,17 +288,24 @@ class MainApp extends StatelessWidget {
         body: Stack(
           children: [
             Positioned.fill(
-              child: Workspace(
-                store: data.store,
-                tasks: tasks,
-                projects: projects,
-                settings: settings,
-                profiles: profiles,
-                activity: activity,
-                reminders: reminders,
-                files: files,
-                sync: data.sync,
-                mcp: mcp,
+              // Signed out: only the sign-in screen.
+              child: ValueListenableBuilder(
+                valueListenable: accounts.account,
+                builder: (context, account, _) => account == null
+                    ? SignInPage(accounts: accounts)
+                    : Workspace(
+                        store: data.store,
+                        tasks: tasks,
+                        projects: projects,
+                        settings: settings,
+                        profiles: profiles,
+                        activity: activity,
+                        reminders: reminders,
+                        files: files,
+                        accounts: accounts,
+                        sync: data.sync,
+                        mcp: mcp,
+                      ),
               ),
             ),
             // Replaces the native title bar: drag to move, double-click to zoom.

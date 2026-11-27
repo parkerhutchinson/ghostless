@@ -55,7 +55,12 @@ class _ActivityPageState extends State<ActivityPage> {
   // Each watch() is a single-listener stream: the list and the
   // mark-as-read listener get one each.
   late Stream<List<Activity>> _stream;
+
+  /// The streams' first values: read when they're made, not each build
+  /// (each read decodes every record).
+  late List<Activity> _activityAtStart;
   late final Stream<List<Task>> _tasks = widget.tasks.watch();
+  late final List<Task> _tasksAtStart = widget.tasks.current();
   late StreamSubscription<List<Activity>> _markRead;
 
   /// The list's scroll, for its scrollbar (outside the fade).
@@ -93,6 +98,7 @@ class _ActivityPageState extends State<ActivityPage> {
   void _watch() {
     final id = widget.profileId;
     _stream = widget.activity.watch(id);
+    _activityAtStart = widget.activity.current(id);
     _markRead = widget.activity.watch(id).listen((list) {
       final unread = list.where((a) => a.isUnread).map((a) => a.id);
       if (unread.isEmpty) return;
@@ -166,7 +172,7 @@ class _ActivityPageState extends State<ActivityPage> {
   Widget build(BuildContext context) {
     return StreamBuilder<List<Activity>>(
       stream: _stream,
-      initialData: widget.activity.current(widget.profileId),
+      initialData: _activityAtStart,
       builder: (context, snap) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -199,7 +205,7 @@ class _ActivityPageState extends State<ActivityPage> {
           Expanded(
             child: StreamBuilder<List<Task>>(
               stream: _tasks,
-              initialData: widget.tasks.current(),
+              initialData: _tasksAtStart,
               builder: (context, taskSnap) => _list(context, snap.requireData, {
                 for (final t in taskSnap.requireData) t.id: t,
               }),

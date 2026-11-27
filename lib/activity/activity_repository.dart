@@ -285,14 +285,28 @@ class ActivityRepository {
 
   void _save(Activity a) => _store.put(collection, a.id, a.toJson());
 
-  static List<Activity> _for(
+  List<Activity> _for(
     Map<String, Map<String, Object?>> records,
     String recipientId, {
     bool dismissed = false,
   }) => [
-    for (final MapEntry(:key, :value) in records.entries)
-      if (Activity.fromJson(key, value) case final a?
-          when a.recipientId == recipientId && (dismissed || !a.isDismissed))
-        a,
-  ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    for (final a in _all(records))
+      if (a.recipientId == recipientId && (dismissed || !a.isDismissed)) a,
+  ];
+
+  /// Every activity in [records], newest first: decoded once per change
+  /// (the store hands back the same map until the collection changes).
+  List<Activity> _all(Map<String, Map<String, Object?>> records) {
+    if (identical(records, _decodedFrom)) return _decoded;
+    _decodedFrom = records;
+    return _decoded = List.unmodifiable(
+      <Activity>[
+        for (final MapEntry(:key, :value) in records.entries)
+          ?Activity.fromJson(key, value),
+      ]..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+    );
+  }
+
+  Map<String, Map<String, Object?>>? _decodedFrom;
+  List<Activity> _decoded = const [];
 }

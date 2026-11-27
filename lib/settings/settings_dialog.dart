@@ -71,6 +71,10 @@ class _SettingsDialog extends StatefulWidget {
 class _SettingsDialogState extends State<_SettingsDialog> {
   _Tab _tab = _Tab.theme;
 
+  /// The last tab picked lies right of the one before it: the new tab
+  /// slides in from the right (and the old one out to the left).
+  bool _forward = true;
+
   /// The tabs there's something to show in.
   List<_Tab> get _tabs => [
     _Tab.theme,
@@ -104,26 +108,38 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     theme.dialogTheme.titleTextStyle ??
                     theme.textTheme.headlineSmall,
               ),
-              if (tabs.length > 1) _switcher(tabs),
+              if (tabs.length > 1)
+                Padding(
+                  // Room between the tabs and their content.
+                  padding: const EdgeInsets.only(bottom: 20),
+                  child: _switcher(tabs),
+                ),
               // The rest of the height; scrolls if a tab needs more.
               Expanded(
-                child: _FadingScroll(
-                  // A fresh scroll position per tab.
-                  key: ValueKey(_tab),
-                  child: switch (_tab) {
-                    _Tab.theme => _theme(),
-                    _Tab.data => Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      spacing: 32,
-                      children: [
-                        SyncSettingsSection(sync: widget.sync!),
-                        if (widget.files case final files?)
-                          FileStorageSection(files: files, sync: widget.sync!),
-                      ],
-                    ),
-                    _Tab.export => ExportSection(sources: widget.export!),
-                    _Tab.mcp => McpSettingsSection(mcp: widget.mcp!),
-                  },
+                child: _TabSlide(
+                  tab: _tab,
+                  forward: _forward,
+                  child: _FadingScroll(
+                    // A fresh scroll position per tab.
+                    key: ValueKey(_tab),
+                    child: switch (_tab) {
+                      _Tab.theme => _theme(),
+                      _Tab.data => Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        spacing: 32,
+                        children: [
+                          SyncSettingsSection(sync: widget.sync!),
+                          if (widget.files case final files?)
+                            FileStorageSection(
+                              files: files,
+                              sync: widget.sync!,
+                            ),
+                        ],
+                      ),
+                      _Tab.export => ExportSection(sources: widget.export!),
+                      _Tab.mcp => McpSettingsSection(mcp: widget.mcp!),
+                    },
+                  ),
                 ),
               ),
               Align(
@@ -162,7 +178,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ),
     ],
     selected: _tab,
-    onChanged: (t) => setState(() => _tab = t),
+    onChanged: (t) => setState(() {
+      _forward = tabs.indexOf(t) > tabs.indexOf(_tab);
+      _tab = t;
+    }),
   );
 
   /// Background image, background color and accent.
@@ -291,9 +310,12 @@ class _BackgroundPicker extends StatelessWidget {
                   image: FileImage(settings.backgroundFile(upload)),
                   selected: current == ImageBackground(upload),
                   onTap: () => settings.setBackground(ImageBackground(upload)),
+                  // Replaced from its own edit button (no Upload tile).
+                  onEdit: _pickImage,
                 ),
-              ),
-            _ChooseImageTile(onTap: _pickImage),
+              )
+            else
+              _ChooseImageTile(onTap: _pickImage),
           ],
         ),
       ],
@@ -425,16 +447,12 @@ class _CustomColorTile extends StatelessWidget {
         child: Container(
           width: 30,
           height: 30,
-          // The accent, like the app's other highlights.
+          // Just an outline (no fill), so it doesn't read as a color.
           decoration: BoxDecoration(
             borderRadius: formRadius,
-            color: Theme.of(context).colorScheme.primary,
+            border: Border.all(color: context.colors.cardBorder),
           ),
-          child: Icon(
-            Symbols.add,
-            size: 16,
-            color: Theme.of(context).colorScheme.onPrimary,
-          ),
+          child: Icon(Symbols.add, size: 16, color: context.colors.text),
         ),
       ),
     ),
@@ -468,11 +486,15 @@ class _ImageTile extends StatelessWidget {
     required this.image,
     required this.selected,
     required this.onTap,
+    this.onEdit,
   });
   final String label;
   final ImageProvider image;
   final bool selected;
   final VoidCallback onTap;
+
+  /// Picks another image in its place: an edit button over its corner.
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -480,21 +502,47 @@ class _ImageTile extends StatelessWidget {
       label: label,
       selected: selected,
       button: true,
-      child: Tooltip(
-        message: label,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: formRadius,
-          child: Container(
-            width: 120,
-            height: 76,
-            decoration: BoxDecoration(
+      child: Stack(
+        children: [
+          Tooltip(
+            message: label,
+            child: InkWell(
+              onTap: onTap,
               borderRadius: formRadius,
-              border: _outline(context, selected),
-              image: DecorationImage(image: image, fit: BoxFit.cover),
+              child: Container(
+                width: 120,
+                height: 76,
+                decoration: BoxDecoration(
+                  borderRadius: formRadius,
+                  border: _outline(context, selected),
+                  image: DecorationImage(image: image, fit: BoxFit.cover),
+                ),
+              ),
             ),
           ),
-        ),
+          if (onEdit case final onEdit?)
+            Positioned(
+              top: 6,
+              right: 6,
+              child: IconButton(
+                tooltip: 'Change image',
+                onPressed: onEdit,
+                icon: const Icon(Symbols.edit, size: 14),
+                // On the surface color, so it reads over any image.
+                style: IconButton.styleFrom(
+                  fixedSize: const Size.square(24),
+                  minimumSize: const Size.square(24),
+                  padding: EdgeInsets.zero,
+                  foregroundColor: context.colors.text,
+                  backgroundColor: context.colors.surface.withValues(
+                    alpha: 0.85,
+                  ),
+                  hoverColor: context.colors.hover,
+                  shape: formShape,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -604,6 +652,55 @@ class _ColorSwatch extends StatelessWidget {
               ? Icon(Symbols.check, size: 16, color: contrastOn(color))
               : null,
         ),
+      ),
+    );
+  }
+}
+
+/// Swaps tabs sideways: the new tab slides (and fades) in from the side
+/// of the tab clicked (from the right for a tab further right), pushing the old
+/// one out the other side.
+class _TabSlide extends StatelessWidget {
+  const _TabSlide({
+    required this.tab,
+    required this.forward,
+    required this.child,
+  });
+
+  /// The tab showing (its [child]'s key is `ValueKey(tab)`).
+  final _Tab tab;
+  final bool forward;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final side = forward ? 1.0 : -1.0;
+    return ClipRect(
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 320),
+        switchInCurve: Curves.easeOutCubic,
+        // Leaving, the animation runs backwards: flipped, it moves in
+        // step with the one coming in.
+        switchOutCurve: Curves.easeOutCubic.flipped,
+        layoutBuilder: (current, previous) =>
+            Stack(children: [...previous, ?current]),
+        transitionBuilder: (child, animation) {
+          // Compare values (the key's type parameter may differ).
+          final incoming = (child.key as ValueKey?)?.value == tab;
+          // The new one fades in as it slides in; the old one fades out
+          // as it slides out.
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: Tween(
+                begin: Offset(incoming ? side : -side, 0),
+                end: Offset.zero,
+              ).animate(animation),
+              child: child,
+            ),
+          );
+        },
+        child: child,
       ),
     );
   }

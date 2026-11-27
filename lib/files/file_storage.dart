@@ -86,12 +86,11 @@ final class StorageConfig {
 
   /// The project URL a Supabase pooler username (`postgres.<ref>`) points
   /// at, to fill in from the database's settings. Null for other names.
-  static String? urlFromDatabaseUser(String username) => switch (RegExp(
-    r'^postgres\.([a-z0-9]+)$',
-  ).firstMatch(username.trim())) {
-    final m? => 'https://${m.group(1)}.supabase.co',
-    null => null,
-  };
+  static String? urlFromDatabaseUser(String username) =>
+      switch (RegExp(r'^postgres\.([a-z0-9]+)$').firstMatch(username.trim())) {
+        final m? => 'https://${m.group(1)}.supabase.co',
+        null => null,
+      };
 
   @override
   bool operator ==(Object other) =>

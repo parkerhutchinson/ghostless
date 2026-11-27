@@ -53,7 +53,7 @@ class _BottomFadeState extends State<BottomFade> {
   }
 }
 
-/// A [SingleChildScrollView] whose bottom fades out ([BottomFade]), with
+/// A scroll view of one child whose bottom fades out ([BottomFade]), with
 /// its scrollbar outside the fade so the scrollbar never fades with it.
 /// Use it for any page that scrolls to the bottom of the window.
 class BottomFadeScrollView extends StatefulWidget {
@@ -82,10 +82,18 @@ class _BottomFadeScrollViewState extends State<BottomFadeScrollView> {
     child: Scrollbar(
       controller: _scroll,
       child: BottomFade(
-        child: SingleChildScrollView(
+        // Not a SingleChildScrollView: that one snaps back from the Mac's
+        // stretch past the end whenever it's laid out again (a hover
+        // changing under the pointer is enough).
+        child: CustomScrollView(
           controller: _scroll,
-          padding: widget.padding,
-          child: widget.child,
+          shrinkWrap: true,
+          slivers: [
+            SliverPadding(
+              padding: widget.padding ?? EdgeInsets.zero,
+              sliver: SliverToBoxAdapter(child: widget.child),
+            ),
+          ],
         ),
       ),
     ),

@@ -10,7 +10,8 @@ import 'form_buttons.dart';
 /// Faded white, like the form's placeholders.
 
 /// Due date (a box you can type in, with a calendar underneath), optional
-/// time (half-hour list, or typed), and a button to clear both.
+/// time (half-hour list), each with a ✕: the date's clears both, the
+/// time's just the time.
 class DueDateField extends StatelessWidget {
   const DueDateField({
     super.key,
@@ -28,32 +29,71 @@ class DueDateField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final date = this.date;
-    return Row(
-      spacing: 8,
+    // The time (and ✕) go onto a second line when there isn't room beside
+    // the date (the form's fields sit beside their labels).
+    // Each box has its ✕ right after it: the date's removes the whole due
+    // date (time included), the time's only the time. The time (and its
+    // ✕) go onto a second line when there isn't room beside the date (the
+    // form's fields sit beside their labels).
+    return Wrap(
+      spacing: 16,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        SizedBox(
-          width: dueDateFieldWidth,
-          child: _DateField(
+        _withClear(
+          _DateField(
             date: date,
             // Emptying the box removes the due date, time included.
             onChanged: (d) => onChanged(d, d == null ? null : time),
           ),
+          date == null
+              ? null
+              : _ClearButton(
+                  tooltip: 'Remove due date',
+                  onPressed: () => onChanged(null, null),
+                ),
         ),
-        if (date != null) ...[
-          SizedBox(
-            width: 140,
-            child: _TimeField(time: time, onChanged: (t) => onChanged(date, t)),
+        if (date != null)
+          _withClear(
+            _TimeField(time: time, onChanged: (t) => onChanged(date, t)),
+            time == null
+                ? null
+                : _ClearButton(
+                    tooltip: 'Remove time',
+                    onPressed: () => onChanged(date, null),
+                  ),
           ),
-          IconButton(
-            tooltip: 'Remove due date',
-            onPressed: () => onChanged(null, null),
-            style: IconButton.styleFrom(shape: formShape),
-            icon: Icon(Symbols.close, size: 18),
-          ),
-        ],
       ],
     );
   }
+
+  /// [field] as narrow as its text, with [clear] right after it.
+  static Widget _withClear(Widget field, Widget? clear) => Row(
+    mainAxisSize: MainAxisSize.min,
+    spacing: 4,
+    children: [_snug(field), ?clear],
+  );
+}
+
+/// A small ✕ beside the date or the time, its hover square hugging it.
+class _ClearButton extends StatelessWidget {
+  const _ClearButton({required this.tooltip, required this.onPressed});
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: tooltip,
+    onPressed: onPressed,
+    padding: EdgeInsets.zero,
+    style: IconButton.styleFrom(
+      shape: formShape,
+      fixedSize: const Size.square(24),
+      minimumSize: const Size.square(24),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+    icon: const Icon(Symbols.close, size: 16),
+  );
 }
 
 /// Width of the date box (the task form's Column and Assignee pickers
@@ -70,7 +110,12 @@ const _calendarHeight = 36 + 20 + 6 * _dayHeight + 16;
 /// project chips.
 const _fieldFontSize = 12.5;
 
-/// Shared look of the date and time boxes.
+/// Width of the list of times under the time field.
+const _timeListWidth = 140.0;
+
+/// Shared look of the date and time fields: no outline, the icon on the
+/// left, the text right after it. They're only as wide as their text
+/// ([_snug]), so the ✕ sits just after them.
 InputDecoration _boxDecoration(
   BuildContext context,
   String hint,
@@ -82,13 +127,20 @@ InputDecoration _boxDecoration(
     fontSize: _fieldFontSize,
     color: context.colors.placeholder,
   ),
-  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+  contentPadding: const EdgeInsets.fromLTRB(0, 12, 2, 12),
   constraints: formFieldConstraints,
-  enabledBorder: context.colors.fieldBorder,
-  border: context.colors.fieldBorder,
-  suffixIcon: Icon(icon, size: 16, color: context.colors.text),
-  suffixIconConstraints: const BoxConstraints(minWidth: 32),
+  border: InputBorder.none,
+  enabledBorder: InputBorder.none,
+  focusedBorder: InputBorder.none,
+  prefixIcon: Padding(
+    padding: const EdgeInsets.only(right: 6),
+    child: Icon(icon, size: 16, color: context.colors.text),
+  ),
+  prefixIconConstraints: const BoxConstraints(),
 );
+
+/// A date or time field only as wide as what's in it (or its hint).
+Widget _snug(Widget field) => IntrinsicWidth(child: field);
 
 /// A date box: click it for a calendar underneath, or type ("nov 20",
 /// "11/20", "tomorrow"); it's read on Enter or when leaving the box. Empty
@@ -232,6 +284,12 @@ class _DateFieldState extends State<_DateField> {
           controller: _controller,
           focusNode: _focus,
           style: const TextStyle(fontSize: _fieldFontSize),
+          // A button, not a text box: a click opens the calendar; no
+          // text cursor, typing or selecting.
+          readOnly: true,
+          showCursor: false,
+          enableInteractiveSelection: false,
+          mouseCursor: SystemMouseCursors.click,
           onTap: _calendar.show,
           onSubmitted: (_) {
             _commit();
@@ -307,22 +365,27 @@ class _TimeFieldState extends State<_TimeField> {
     widget.onChanged(time);
   }
 
-  /// While the box shows the chosen time, the list starts there (so it's
-  /// highlighted) and runs through the day; otherwise it's what matches.
+  /// The list starts at the chosen time (so it's highlighted) and runs
+  /// through the day; with a time chosen, "Any time" (no time) comes
+  /// first. (The field can't be typed in, so it's never a search.)
   Iterable<int> _options(TextEditingValue value) {
     _scrolledTo = null;
     final current = widget.time;
-    if (value.text.isEmpty || value.text == _label(current)) {
-      if (current == null) return timeSlots;
-      final start = timeSlots.indexWhere((s) => s >= current);
-      return [
-        if (!timeSlots.contains(current)) current,
-        ...timeSlots.skip(start < 0 ? 0 : start),
-        ...timeSlots.take(start < 0 ? 0 : start),
-      ];
-    }
-    return timeSuggestions(value.text);
+    if (current == null) return timeSlots;
+    final start = timeSlots.indexWhere((s) => s >= current);
+    return [
+      if (!timeSlots.contains(current)) current,
+      ...timeSlots.skip(start < 0 ? 0 : start),
+      ...timeSlots.take(start < 0 ? 0 : start),
+      _anyTime,
+    ];
   }
+
+  /// The "Any time" choice: takes the time off.
+  static const _anyTime = -1;
+
+  static String _optionLabel(int t) =>
+      t == _anyTime ? 'Any time' : formatTime(t);
 
   @override
   Widget build(BuildContext context) {
@@ -330,8 +393,13 @@ class _TimeFieldState extends State<_TimeField> {
       textEditingController: _controller,
       focusNode: _focus,
       optionsBuilder: _options,
-      displayStringForOption: formatTime,
+      displayStringForOption: (t) => t == _anyTime ? '' : formatTime(t),
       onSelected: (t) {
+        if (t == _anyTime) {
+          _controller.text = '';
+          widget.onChanged(null);
+          return;
+        }
         _controller.text = formatTime(t);
         widget.onChanged(t);
       },
@@ -342,14 +410,24 @@ class _TimeFieldState extends State<_TimeField> {
         controller: controller,
         focusNode: focus,
         style: const TextStyle(fontSize: _fieldFontSize),
+        // A button, not a text box: a click opens the list of times; no
+        // text cursor, typing or selecting.
+        readOnly: true,
+        showCursor: false,
+        enableInteractiveSelection: false,
+        mouseCursor: SystemMouseCursors.click,
         onSubmitted: (_) {
           onSubmitted();
           _commit();
         },
         decoration: _boxDecoration(context, 'Any time', Symbols.schedule),
       ),
-      optionsViewBuilder: (context, onSelected, options) => Align(
+      // Its own width, not the field's: the field is only as wide as the
+      // time in it, which squeezed "AM"/"PM" onto a second line.
+      optionsViewBuilder: (context, onSelected, options) => OverflowBox(
         alignment: Alignment.topLeft,
+        minWidth: _timeListWidth,
+        maxWidth: _timeListWidth,
         child: Material(
           color: context.colors.surface,
           elevation: 8,
@@ -359,46 +437,59 @@ class _TimeFieldState extends State<_TimeField> {
           ),
           clipBehavior: Clip.antiAlias,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 240, maxWidth: 140),
+            constraints: const BoxConstraints(maxHeight: 240),
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 4),
               shrinkWrap: true,
               itemCount: options.length,
-              itemBuilder: (context, i) {
-                final option = options.elementAt(i);
-                final highlighted =
-                    AutocompleteHighlightedOption.of(context) == i;
-                if (highlighted && _scrolledTo != i) {
-                  _scrolledTo = i;
-                  // Keep the highlighted time in view (arrow keys, or the
-                  // current time opening at the top).
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (context.mounted) {
-                      Scrollable.ensureVisible(context, alignment: 0.5);
-                    }
-                  });
-                }
-                return InkWell(
-                  onTap: () => onSelected(option),
-                  child: Container(
-                    color: highlighted
-                        ? Theme.of(context).colorScheme.primary
-                        : null,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    child: Text(
-                      formatTime(option),
-                      style: highlighted
-                          ? TextStyle(
-                              color: Theme.of(context).colorScheme.onPrimary,
-                            )
+              // Each item in a Builder: its own context, so keeping the
+              // highlighted one in view reveals that item (the list's
+              // context revealed the whole list, jumping it about).
+              itemBuilder: (context, i) => Builder(
+                builder: (context) {
+                  final option = options.elementAt(i);
+                  final highlighted =
+                      AutocompleteHighlightedOption.of(context) == i;
+                  if (highlighted && _scrolledTo != i) {
+                    // Keep the highlighted time in view as the arrow keys move
+                    // it: scrolled only as far as needed (centring it jumped
+                    // the list ~20 rows down on opening).
+                    final down = i > (_scrolledTo ?? -1);
+                    _scrolledTo = i;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (context.mounted) {
+                        Scrollable.ensureVisible(
+                          context,
+                          alignmentPolicy: down
+                              ? ScrollPositionAlignmentPolicy.keepVisibleAtEnd
+                              : ScrollPositionAlignmentPolicy
+                                    .keepVisibleAtStart,
+                        );
+                      }
+                    });
+                  }
+                  return InkWell(
+                    onTap: () => onSelected(option),
+                    child: Container(
+                      color: highlighted
+                          ? Theme.of(context).colorScheme.primary
                           : null,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: Text(
+                        _optionLabel(option),
+                        style: highlighted
+                            ? TextStyle(
+                                color: Theme.of(context).colorScheme.onPrimary,
+                              )
+                            : null,
+                      ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
         ),

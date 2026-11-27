@@ -11,6 +11,7 @@ import '../projects/project_dashboard.dart';
 import '../projects/project_logo.dart';
 import '../projects/project_repository.dart';
 import '../widgets/bottom_fade.dart';
+import '../widgets/loading_spinner.dart';
 import '../settings/background.dart';
 import '../widgets/frosted_bar.dart';
 import '../widgets/undo_snack_bar.dart';
@@ -116,6 +117,11 @@ class TasksPage extends StatefulWidget {
 class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
   late TaskView _view = widget.view;
   late final Stream<List<Task>> _tasks = widget.repo.watch();
+
+  /// The tasks as they were when the page opened: the stream's first
+  /// value. Read once: an argument in build would read (and decode) every
+  /// task again on each rebuild, though only the first build uses it.
+  late final List<Task> _tasksAtStart = widget.repo.current();
 
   /// Cards whose subtasks are shown, per project: expanding a task on one
   /// board leaves it collapsed on the others.
@@ -519,21 +525,13 @@ class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
             Expanded(
               child: StreamBuilder<List<Task>>(
                 stream: _tasks,
-                initialData: widget.repo.current(),
+                initialData: _tasksAtStart,
                 builder: (context, snapshot) {
                   // A big project's board comes a frame later: a
                   // spinner until then (see _deferBoard). Here, inside
                   // the builder, so the tasks stay listened to.
                   if (!_boardReady) {
-                    return Center(
-                      child: SizedBox.square(
-                        dimension: 22,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: context.colors.mutedText,
-                        ),
-                      ),
-                    );
+                    return const Center(child: LoadingSpinner());
                   }
                   // Each project has its own board: tasks as placed
                   // here (column and order).
@@ -590,6 +588,7 @@ class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
                         onDeleteColumn: _deleteColumn,
                         onAddColumn: _addColumn,
                         editingColumnId: _newColumnId,
+                        openTask: _openTask,
                       ),
                       TaskView.list => _TaskList(
                         key: ValueKey(widget.projectId),

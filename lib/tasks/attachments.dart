@@ -279,16 +279,32 @@ class _AttachmentTileState extends State<_AttachmentTile> {
     ),
   );
 
-  /// A document's tile: its type's icon (its name shows on hover; the
-  /// tiles are too small for it).
+  /// A document's tile: its file type in letters ("PDF", "DOCX", "XLSX",
+  /// "TXT"), clearer at this size than an icon; a document icon only when
+  /// the file has no extension. Its name shows on hover; the tiles are too
+  /// small for it.
   Widget _document(BuildContext context, Attachment a) => ColoredBox(
     color: context.colors.hover,
     child: Center(
-      child: Icon(
-        a.extension == 'pdf' ? Symbols.picture_as_pdf : Symbols.draft,
-        size: 20,
-        color: context.colors.text,
-      ),
+      child: a.extension.isEmpty
+          ? Icon(Symbols.draft, size: 20, color: context.colors.text)
+          : Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              // A long extension shrinks to fit rather than wrapping.
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  a.extension.toUpperCase(),
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w400,
+                    letterSpacing: 0.5,
+                    color: context.colors.text,
+                  ),
+                ),
+              ),
+            ),
     ),
   );
 

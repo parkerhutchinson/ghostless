@@ -9,6 +9,7 @@ import '../widgets/left_menu_button.dart';
 import 'profile.dart';
 import 'profile_avatar.dart';
 import 'profile_repository.dart';
+import '../widgets/watched.dart';
 
 /// Every profile, for widgets anywhere in the app (task cards, the list,
 /// the task form) to show assignees. Sits above the app's navigator, so
@@ -23,11 +24,11 @@ class ProfilesScope extends InheritedWidget {
 
   /// Keeps [child] supplied with [repo]'s profiles as they change.
   static Widget watching(ProfileRepository repo, {required Widget child}) =>
-      StreamBuilder<List<Profile>>(
-        stream: repo.watch(),
-        initialData: repo.all(),
-        builder: (context, snap) => ProfilesScope(
-          profiles: snap.requireData,
+      Watched<List<Profile>>(
+        watch: repo.watch,
+        current: repo.all,
+        builder: (context, all) => ProfilesScope(
+          profiles: all,
           imageOf: (p) => switch (p.imageFile) {
             final name? => repo.imageFile(name),
             null => null,

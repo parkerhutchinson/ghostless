@@ -427,8 +427,21 @@ class TaskRepository {
       ? a.order.compareTo(b.order)
       : a.createdAt.compareTo(b.createdAt);
 
-  static List<Task> _visible(Map<String, Map<String, Object?>> records) => [
-    for (final MapEntry(:key, :value) in records.entries)
-      Task.fromJson(key, value),
-  ].toList()..sort(_byOrder);
+  /// The tasks in [records] (the store's [LocalStore.all]), in order.
+  /// Decoded once per change: the store hands back the same map until the
+  /// collection changes, so every watcher and caller in between shares
+  /// one (unmodifiable) list instead of decoding every task again.
+  List<Task> _visible(Map<String, Map<String, Object?>> records) {
+    if (identical(records, _decodedFrom)) return _decoded;
+    _decodedFrom = records;
+    return _decoded = List.unmodifiable(
+      <Task>[
+        for (final MapEntry(:key, :value) in records.entries)
+          Task.fromJson(key, value),
+      ]..sort(_byOrder),
+    );
+  }
+
+  Map<String, Map<String, Object?>>? _decodedFrom;
+  List<Task> _decoded = const [];
 }

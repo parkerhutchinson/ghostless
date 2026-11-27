@@ -1,3 +1,5 @@
+import 'dart:math' show min;
+
 import '../comments/comments_scope.dart';
 
 import 'package:material_ui/material_ui.dart';
@@ -8,6 +10,7 @@ import '../projects/project.dart';
 import '../projects/project_logo.dart';
 import '../app_theme.dart';
 import 'due_date.dart';
+import 'form_buttons.dart' show formChipFontSize;
 import 'label_colors.dart';
 import 'label_line.dart';
 import 'task.dart';
@@ -359,9 +362,9 @@ class _TaskRowState extends State<TaskRow> {
             padding: const EdgeInsets.symmetric(
               horizontal: TaskTable.cellPadding,
             ),
-            // At least [TaskTable.height]; taller when the projects wrap
-            // onto more lines (labels stay on one). IntrinsicHeight lets the column lines run the
-            // row's full height.
+            // At least [TaskTable.height] (labels and projects stay on one
+            // line). IntrinsicHeight lets the column lines run the row's
+            // full height.
             child: ConstrainedBox(
               constraints: const BoxConstraints(minHeight: TaskTable.height),
               child: IntrinsicHeight(
@@ -461,18 +464,19 @@ class _TaskRowState extends State<TaskRow> {
                     ),
                     Expanded(
                       flex: TaskTable.projectsFlex,
-                      // Like the card: one label per line when they don't
-                      // fit side by side, and a name too long for the
-                      // column ends in "…".
+                      // Like the labels: one line, as many as fit, then
+                      // "+N"; hovering shows them all. Only one, too long:
+                      // its name ends in "…".
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Wrap(
-                          spacing: 4,
-                          runSpacing: 4,
-                          children: [
-                            for (final p in widget.multiHomes)
-                              _MultiHomeLabel(project: p),
-                          ],
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: ChipLine(
+                            chips: [
+                              for (final p in widget.multiHomes)
+                                _MultiHomeLabel(project: p),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -659,13 +663,29 @@ class _Body extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (final (i, sub) in task.subtasks.indexed)
+              for (final (i, sub)
+                  in task.subtasks.take(cardSubtaskLimit).indexed)
                 SubtaskLine(
                   subtask: sub,
-                  last: i == task.subtasks.length - 1,
+                  last: i ==
+                      min(task.subtasks.length, cardSubtaskLimit) - 1,
                   onToggle: onToggleSubtask == null
                       ? null
                       : () => onToggleSubtask!(sub.id),
+                ),
+              // Past the limit, just how many more: the form shows them
+              // all.
+              if (task.subtasks.length > cardSubtaskLimit)
+                Padding(
+                  padding: const EdgeInsets.only(left: 26, top: 2, bottom: 3),
+                  child: Text(
+                    '+${task.subtasks.length - cardSubtaskLimit} more',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      height: 1.35,
+                      color: context.colors.mutedText,
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -897,23 +917,23 @@ class _MultiHomeLabel extends StatelessWidget {
   }
 }
 
-/// Diameter of a task's done checkbox: the same as the assignee avatar.
-const taskCheckboxSize = 20.0;
+/// Size of a task's done checkbox.
+const taskCheckboxSize = 16.0;
 
-/// Round checkbox: an outline when open, a white circle with the check in
-/// the card's color when checked off.
+/// Checkbox, a rounded square ([formRadius]): an outline when open, filled
+/// white with the check in the card's color when checked off.
 class DoneButton extends StatelessWidget {
   const DoneButton({
     super.key,
     required this.done,
     this.onPressed,
-    this.size = 15,
+    this.size = 13,
   });
   final bool done;
   final VoidCallback? onPressed;
 
-  /// Diameter. A task's own checkbox matches the assignee avatar
-  /// ([taskCheckboxSize]); subtasks use the smaller default.
+  /// Width and height: [taskCheckboxSize] for a task's own checkbox;
+  /// subtasks use the smaller default.
   final double size;
 
   @override
@@ -934,7 +954,7 @@ class DoneButton extends StatelessWidget {
               width: size,
               height: size,
               decoration: BoxDecoration(
-                shape: BoxShape.circle,
+                borderRadius: formRadius,
                 color: done ? fill : context.colors.card,
                 border: Border.all(
                   color: done ? fill : context.colors.mutedText,
@@ -965,8 +985,21 @@ class LabelChip extends StatelessWidget {
     required this.projectId,
     this.onDeleted,
     this.color,
+    this.large = false,
+    this.fontSize,
   });
   final String tag;
+
+  /// The text size, when it's not the usual for its size (the task form's
+  /// label list uses the form's, on the small chip).
+  final double? fontSize;
+
+  /// The task form's size ([largeHeight], a little shorter than its
+  /// fields), with the project chips' text and ✕ sizes. Otherwise small,
+  /// for cards and lists.
+  final bool large;
+
+  static const largeHeight = 28.0;
 
   /// The project whose colors it's in: its task's origin.
   final String? projectId;
@@ -976,8 +1009,12 @@ class LabelChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = this.color ?? LabelColors.of(context, tag, projectId);
+    final side = large ? 10.0 : 7.0;
     return Container(
-      padding: EdgeInsets.fromLTRB(7, 3, onDeleted == null ? 7 : 3, 3),
+      height: large ? largeHeight : null,
+      padding: large
+          ? EdgeInsets.fromLTRB(side, 0, onDeleted == null ? side : 6, 0)
+          : EdgeInsets.fromLTRB(side, 3, onDeleted == null ? side : 3, 3),
       decoration: BoxDecoration(
         color: labelFill(color),
         borderRadius: formRadius,
@@ -991,7 +1028,7 @@ class LabelChip extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 11.5,
+                fontSize: fontSize ?? (large ? formChipFontSize : 11.5),
                 height: chipLineHeight,
                 leadingDistribution: TextLeadingDistribution.even,
                 fontWeight: FontWeight.w400,
@@ -1004,8 +1041,12 @@ class LabelChip extends StatelessWidget {
               onTap: onDeleted,
               borderRadius: formRadius,
               child: Padding(
-                padding: const EdgeInsets.only(left: 2),
-                child: Icon(Symbols.close, size: 13, color: labelText(color)),
+                padding: EdgeInsets.only(left: large ? 6 : 2),
+                child: Icon(
+                  Symbols.close,
+                  size: large ? 14 : 13,
+                  color: labelText(color),
+                ),
               ),
             ),
         ],
@@ -1087,6 +1128,9 @@ class _SubtaskToggleState extends State<_SubtaskToggle> {
     );
   }
 }
+
+/// The most subtasks a board card lists; the rest are a count.
+const cardSubtaskLimit = 15;
 
 /// One subtask in a tree: a line down from the task (the trunk, under the
 /// task's checkbox) with a branch out to the subtask's checkbox, then its

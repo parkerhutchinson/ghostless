@@ -21,6 +21,7 @@ dependencies:
   mysql1: ^0.23.0
   path_provider: ^2.1.6
   postgres: ^3.6.0
+  supabase: ^2.16.5
   sync_engine:
     path: packages/sync_engine
   timezone: ^0.11.2

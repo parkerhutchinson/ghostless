@@ -10,6 +10,7 @@ import 'remote_config.dart';
 import 'sync_service.dart';
 import '../widgets/sliding_toggle.dart';
 import '../widgets/selected_text.dart';
+import '../widgets/watched.dart';
 
 /// The Sync section of Settings: where the app syncs to (or that it's
 /// local-only), with buttons to connect, sync now, change or disconnect.
@@ -18,11 +19,10 @@ class SyncSettingsSection extends StatelessWidget {
   final SyncService sync;
 
   @override
-  Widget build(BuildContext context) => StreamBuilder<SyncConnection?>(
-    stream: sync.watch(),
-    initialData: sync.current,
-    builder: (context, snap) {
-      final connection = snap.data;
+  Widget build(BuildContext context) => Watched<SyncConnection?>(
+    watch: sync.watch,
+    current: () => sync.current,
+    builder: (context, connection) {
       final muted = TextStyle(fontSize: 13, color: context.colors.mutedText);
       Widget outlined(String label, VoidCallback onPressed) => OutlinedButton(
         onPressed: onPressed,
@@ -97,7 +97,7 @@ class _ConnectionStatus extends StatelessWidget {
           SyncPhase.syncing => (Symbols.sync, 'Syncing…$pending'),
           SyncPhase.offline => (
             Symbols.cloud_off,
-            'Can’t reach it right now; retrying.$pending',
+            'Can’t reach it right now. ${retrying(s.retryIn)}$pending',
           ),
           SyncPhase.idle => (
             Symbols.cloud_done,

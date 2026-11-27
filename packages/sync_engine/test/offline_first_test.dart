@@ -111,6 +111,11 @@ void main() {
       expect(sync.status.phase, SyncPhase.offline);
       expect(sync.status.pending, 1);
       expect(sync.status.lastError, isA<SocketException>());
+      expect(
+        sync.status.retryIn,
+        isNotNull,
+        reason: 'says when it tries again',
+      );
       expect(store.get('notes', 'n1'), {'text': 'written offline'});
       expect(remote.records('notes'), isEmpty);
 

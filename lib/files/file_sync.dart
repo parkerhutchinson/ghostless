@@ -69,7 +69,8 @@ class FileSync {
   bool _running = false, _again = false;
 
   /// Where files are kept, or null when they stay on this Mac.
-  StorageConfig? get config => StorageConfig.fromJson(_store.get(_ui, _configKey));
+  StorageConfig? get config =>
+      StorageConfig.fromJson(_store.get(_ui, _configKey));
 
   /// Starts syncing if storage was connected before; then runs whenever
   /// [changes] fire (records changed: maybe new files), and every few

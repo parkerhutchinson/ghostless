@@ -6,23 +6,28 @@ import '../app_theme.dart';
 import 'profile.dart';
 import 'profile_avatar.dart';
 import 'profile_repository.dart';
+import '../account/account_service.dart';
 import '../widgets/selected_text.dart';
+import '../widgets/watched.dart';
 
 /// The Profile modal, opened from the avatar at the bottom of the sidebar:
-/// the current profile's photo and name, and the other profiles on this
-/// Mac to switch to (or a new one to create).
+/// your photo, name and details, and the account you're signed in with
+/// (and signing out). Each Mac has one signed-in person: there's no
+/// switching between profiles.
 Future<void> showProfileDialog(
   BuildContext context,
-  ProfileRepository profiles,
-) => showDialog<void>(
+  ProfileRepository profiles, {
+  AccountService? accounts,
+}) => showDialog<void>(
   context: context,
   barrierColor: Colors.black54,
-  builder: (_) => _ProfileDialog(profiles: profiles),
+  builder: (_) => _ProfileDialog(profiles: profiles, accounts: accounts),
 );
 
 class _ProfileDialog extends StatefulWidget {
-  const _ProfileDialog({required this.profiles});
+  const _ProfileDialog({required this.profiles, this.accounts});
   final ProfileRepository profiles;
+  final AccountService? accounts;
 
   @override
   State<_ProfileDialog> createState() => _ProfileDialogState();
@@ -33,10 +38,6 @@ class _ProfileDialogState extends State<_ProfileDialog> {
   late final Profile _profile = _repo.current!;
   late final _name = AppTextController(text: _profile.name);
 
-  /// The other profiles' list, which scrolls once it's [_othersMaxHeight]
-  /// tall.
-  final _othersScroll = ScrollController();
-  static const _othersMaxHeight = 2.5 * 44.0;
   late final _department = AppTextController(text: _profile.department);
   late final _jobTitle = AppTextController(text: _profile.jobTitle);
   late final _description = AppTextController(text: _profile.description);
@@ -47,7 +48,6 @@ class _ProfileDialogState extends State<_ProfileDialog> {
     _department.dispose();
     _jobTitle.dispose();
     _description.dispose();
-    _othersScroll.dispose();
     super.dispose();
   }
 
@@ -79,19 +79,11 @@ class _ProfileDialogState extends State<_ProfileDialog> {
     await _repo.setImage(_profile.id, file.path);
   }
 
-  void _switchTo(Profile other) {
-    _repo.switchTo(other.id);
+  Future<void> _signOut() async {
+    final accounts = widget.accounts;
+    if (accounts == null) return;
     Navigator.pop(context);
-  }
-
-  Future<void> _newProfile() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => const _NewProfileDialog(),
-    );
-    if (name == null || !mounted) return;
-    _repo.create(name: name);
-    Navigator.pop(context);
+    await accounts.signOut();
   }
 
   @override
@@ -102,14 +94,12 @@ class _ProfileDialogState extends State<_ProfileDialog> {
       title: const Text('Profile'),
       content: SizedBox(
         width: 400,
-        child: StreamBuilder<List<Profile>>(
-          stream: _repo.watch(),
-          initialData: _repo.all(),
-          builder: (context, snap) {
-            final all = snap.requireData;
+        child: Watched<List<Profile>>(
+          watch: _repo.watch,
+          current: _repo.all,
+          builder: (context, all) {
             final me =
                 all.where((p) => p.id == _profile.id).firstOrNull ?? _profile;
-            final others = all.where((p) => p.id != me.id).toList();
             // Scrolls when the window is too short for the whole form.
             return SingleChildScrollView(
               child: Column(
@@ -127,26 +117,36 @@ class _ProfileDialogState extends State<_ProfileDialog> {
                     ],
                   ),
                   _field(_description, 'Description', multiline: true),
-                  Divider(height: 8, color: context.colors.cardBorder),
-                  _Label('Switch profile'),
-                  if (others.isEmpty)
-                    Text(
-                      'No other profiles yet.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: context.colors.mutedText,
-                      ),
+                  if (widget.accounts?.account.value case final account?) ...[
+                    Divider(height: 8, color: context.colors.cardBorder),
+                    _Label('Account'),
+                    Row(
+                      spacing: 10,
+                      children: [
+                        Icon(
+                          Symbols.mail,
+                          size: 18,
+                          color: context.colors.mutedText,
+                        ),
+                        Expanded(
+                          child: Text(
+                            account.email,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13.5),
+                          ),
+                        ),
+                        OutlinedButton(
+                          onPressed: _signOut,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: context.colors.text,
+                            side: BorderSide(color: context.colors.formBorder),
+                          ),
+                          child: const Text('Sign out'),
+                        ),
+                      ],
                     ),
-                  if (others.isNotEmpty) _otherProfiles(others),
-                  OutlinedButton.icon(
-                    onPressed: _newProfile,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: context.colors.text,
-                      side: BorderSide(color: context.colors.formBorder),
-                    ),
-                    icon: Icon(Symbols.person_add, size: 18),
-                    label: const Text('New profile'),
-                  ),
+                  ],
                 ],
               ),
             );
@@ -208,106 +208,6 @@ class _ProfileDialogState extends State<_ProfileDialog> {
       onSubmitted: multiline ? null : (_) => _save(),
     ),
   );
-
-  /// The other profiles, in a box at most [_othersMaxHeight] tall that
-  /// scrolls past that, its scrollbar always showing so it's clear there's
-  /// more. (The dialog's own scroll is for a window too short for it.)
-  Widget _otherProfiles(List<Profile> others) => Container(
-    constraints: const BoxConstraints(maxHeight: _othersMaxHeight),
-    decoration: BoxDecoration(
-      border: Border.all(color: context.colors.cardBorder),
-      borderRadius: formRadius,
-    ),
-    child: ScrollConfiguration(
-      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-      child: Scrollbar(
-        controller: _othersScroll,
-        thumbVisibility: true,
-        child: ListView(
-          controller: _othersScroll,
-          shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(10, 2, 14, 2),
-          children: [for (final p in others) _otherProfile(p)],
-        ),
-      ),
-    ),
-  );
-
-  Widget _otherProfile(Profile p) => Row(
-    spacing: 10,
-    children: [
-      ProfileAvatar(
-        profile: p,
-        image: p.imageFile == null ? null : _repo.imageFile(p.imageFile!),
-      ),
-      Expanded(
-        child: Text(
-          p.displayName,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 13.5),
-        ),
-      ),
-      TextButton(onPressed: () => _switchTo(p), child: const Text('Switch')),
-    ],
-  );
-}
-
-/// Asks for a new profile's name.
-class _NewProfileDialog extends StatefulWidget {
-  const _NewProfileDialog();
-
-  @override
-  State<_NewProfileDialog> createState() => _NewProfileDialogState();
-}
-
-class _NewProfileDialogState extends State<_NewProfileDialog> {
-  final _name = AppTextController();
-
-  @override
-  void dispose() {
-    _name.dispose();
-    super.dispose();
-  }
-
-  bool get _canCreate => _name.text.trim().isNotEmpty;
-
-  void _create() {
-    if (!_canCreate) return;
-    Navigator.pop(context, _name.text);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: context.colors.surface,
-      shape: formShape,
-      title: const Text('New profile'),
-      content: SizedBox(
-        width: 360,
-        child: _Labeled(
-          'Full name',
-          TextField(
-            controller: _name,
-            autofocus: true,
-            decoration: _fieldDecoration(context),
-            onChanged: (_) => setState(() {}),
-            onSubmitted: (_) => _create(),
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _canCreate ? _create : null,
-          child: const Text('Create and switch'),
-        ),
-      ],
-    );
-  }
 }
 
 /// A profile field's box: a plain outlined input, no label inside it (the

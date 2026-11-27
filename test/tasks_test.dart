@@ -407,8 +407,10 @@ void main() {
         find.widgetWithText(TextField, 'Task title'),
         'Fresh',
       );
+      await tester.tap(text('Add label'));
+      await tester.pumpAndSettle();
       await tester.enterText(
-        find.widgetWithText(TextField, 'Add label, press Enter'),
+        find.widgetWithText(TextField, 'Find or create label'),
         'ui,',
       );
       await tester.pump();
@@ -433,8 +435,9 @@ void main() {
         find.widgetWithText(TextField, 'Task title'),
         'Labelled',
       );
-      final field = find.widgetWithText(TextField, 'Add label, press Enter');
-      await tester.tap(field);
+      await tester.tap(text('Add label'));
+      await tester.pumpAndSettle();
+      final field = find.widgetWithText(TextField, 'Find or create label');
       await tester.enterText(field, 'Design');
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
@@ -542,10 +545,8 @@ void main() {
         reason: 'gone from form',
       );
 
-      // Nor offered again in the label field.
-      await tester.tap(
-        find.widgetWithText(TextField, 'Add label, press Enter'),
-      );
+      // Nor offered again in the label box.
+      await tester.tap(text('Add label'));
       await tester.pumpAndSettle();
       expect(text('Defect'), findsNothing);
     });
@@ -559,10 +560,13 @@ void main() {
       await tester.tap(text('T'));
       await tester.pumpAndSettle();
 
-      final field = find.widgetWithText(TextField, 'Add label, press Enter');
-      // The Other card on the board shows Beta and Gamma too.
-      await tester.tap(field);
+      final field = find.widgetWithText(TextField, 'Find or create label');
+      // The field is in the box the + after the labels opens.
+      expect(field, findsNothing);
+      await tester.tap(find.byTooltip('Add label'));
       await tester.pumpAndSettle();
+      // The box is open, its field focused. The Other card on the board
+      // shows Beta and Gamma too.
       expect(text('Beta'), findsNWidgets(2));
       expect(text('Gamma'), findsNWidgets(2));
 
@@ -596,11 +600,12 @@ void main() {
       await tester.pumpAndSettle();
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
+      expect(text('Gamma'), findsNWidgets(2), reason: 'still open after Enter');
       store.put('projects', pid, project.toJson());
       await tester.tap(text('Save changes'));
       await tester.pumpAndSettle();
       expect(ProjectRepository(store).get(pid)!.labelColors['epsilon'], 3);
-      expect(text('Gamma'), findsNWidgets(2), reason: 'still open after Enter');
+      expect(text('Gamma'), findsOneWidget, reason: 'a click outside closes it');
       expect(repo.get(t.id)!.tags, ['Alpha', 'Beta', 'Delta', 'Epsilon']);
     });
   });

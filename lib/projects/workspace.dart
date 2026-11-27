@@ -12,6 +12,7 @@ import '../export/export_section.dart';
 import '../mcp/mcp_service.dart';
 import '../reminders/reminder_service.dart';
 import '../files/file_sync.dart';
+import '../account/account_service.dart';
 import '../search/search_dialog.dart';
 import '../sync/sync_service.dart';
 import '../tasks/task.dart';
@@ -32,6 +33,7 @@ import 'project_repository.dart';
 import 'project_sidebar.dart';
 import '../sync_status_indicator.dart';
 import '../app_theme.dart';
+import '../widgets/watched.dart';
 
 /// Sidebar of projects next to the selected project's tasks.
 class Workspace extends StatefulWidget {
@@ -47,7 +49,11 @@ class Workspace extends StatefulWidget {
     this.mcp,
     this.reminders,
     this.files,
+    this.accounts,
   });
+
+  /// Who's signed in (shown, and signed out, in the Profile modal).
+  final AccountService? accounts;
 
   /// Files online (Settings › Data).
   final FileSync? files;
@@ -92,6 +98,15 @@ class _WorkspaceState extends State<Workspace> {
   late final Stream<List<Project>> _projects = widget.projects.watch();
   late final Stream<List<Task>> _tasks = widget.tasks.watch();
   late final Stream<Profile?> _profile = widget.profiles.watchCurrent();
+
+  // The streams' first values, read once. Passed straight to
+  // StreamBuilder.initialData in build, they were read again (every task
+  // decoded) on each rebuild, though only the first build
+  // uses them: opening or closing a task form stalled for 100ms+ in a big
+  // project.
+  late final List<Project> _projectsAtStart = widget.projects.current();
+  late final List<Task> _tasksAtStart = widget.tasks.current();
+  late final Profile? _profileAtStart = widget.profiles.current;
 
   /// Each project's view (board, list, dashboard), remembered here.
   late final _views = ProjectViews(widget.store);
@@ -386,10 +401,10 @@ class _WorkspaceState extends State<Workspace> {
   Widget build(BuildContext context) {
     return StreamBuilder<Profile?>(
       stream: _profile,
-      initialData: widget.profiles.current,
+      initialData: _profileAtStart,
       builder: (context, profileSnap) => StreamBuilder<List<Project>>(
         stream: _projects,
-        initialData: widget.projects.current(),
+        initialData: _projectsAtStart,
         builder: (context, projectSnap) =>
             _build(context, profileSnap.data, projectSnap.requireData),
       ),
@@ -418,21 +433,19 @@ class _WorkspaceState extends State<Workspace> {
           width: sidebarWidth,
           child: StreamBuilder<List<Task>>(
             stream: _tasks,
-            initialData: widget.tasks.current(),
-            builder: (context, taskSnap) => StreamBuilder<List<Activity>>(
+            initialData: _tasksAtStart,
+            builder: (context, taskSnap) => Watched<List<Activity>>(
               // Keyed by profile: a switch watches the new one's activity.
               key: ValueKey(profile?.id),
-              stream: profile == null
+              watch: () => profile == null
                   ? const Stream.empty()
                   : widget.activity.watch(profile.id),
-              initialData: profile == null
+              current: () => profile == null
                   ? const []
                   : widget.activity.current(profile.id),
-              builder: (context, activitySnap) => ProjectSidebar(
+              builder: (context, activity) => ProjectSidebar(
                 activitySelected: showActivity,
-                unreadActivity: activitySnap.requireData
-                    .where((a) => a.isUnread)
-                    .length,
+                unreadActivity: activity.where((a) => a.isUnread).length,
                 onOpenActivity: () => _select(Workspace.activityViewId),
                 projects: shared,
                 personal: personal,
@@ -441,8 +454,11 @@ class _WorkspaceState extends State<Workspace> {
                 profileImage: profile?.imageFile == null
                     ? null
                     : widget.profiles.imageFile(profile!.imageFile!),
-                onOpenProfile: () =>
-                    showProfileDialog(context, widget.profiles),
+                onOpenProfile: () => showProfileDialog(
+                  context,
+                  widget.profiles,
+                  accounts: widget.accounts,
+                ),
                 tasks: taskSnap.requireData,
                 selectedId: selected?.id,
                 onSelect: _select,

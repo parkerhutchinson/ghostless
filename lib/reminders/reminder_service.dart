@@ -89,9 +89,8 @@ class ReminderService {
     // Tops up the schedule as reminders go off (only the soonest
     // [maxScheduledReminders] are scheduled).
     _subscriptions.add(
-      Stream<void>.periodic(
-        const Duration(minutes: 15),
-      ).listen((_) => _schedule()),
+      Stream<void>.periodic(const Duration(minutes: 15))
+          .listen((_) => _schedule()),
     );
   }
 
@@ -104,8 +103,7 @@ class ReminderService {
           .resolvePlatformSpecificImplementation<
             MacOSFlutterLocalNotificationsPlugin
           >();
-      return await mac?.requestPermissions(alert: true, sound: true) ??
-          false;
+      return await mac?.requestPermissions(alert: true, sound: true) ?? false;
     } catch (_) {
       return false;
     }
@@ -177,9 +175,8 @@ class RemindersScope extends InheritedWidget {
 
   final ReminderService service;
 
-  static ReminderService? maybeOf(BuildContext context) => context
-      .dependOnInheritedWidgetOfExactType<RemindersScope>()
-      ?.service;
+  static ReminderService? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<RemindersScope>()?.service;
 
   @override
   bool updateShouldNotify(RemindersScope old) => old.service != service;

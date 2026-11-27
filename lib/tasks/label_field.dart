@@ -3,6 +3,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../app_theme.dart';
+import '../widgets/picker_dropdown.dart';
+import 'form_buttons.dart' show formChipFontSize;
 import 'label_colors.dart';
 import 'project_labels.dart' show clipLabel, maxLabelLength;
 import 'task_card.dart' show LabelChip;
@@ -35,12 +37,13 @@ List<LabelOption> labelOptions(
   ];
 }
 
-/// The task form's label field. While it's focused, a list under it shows
-/// [options] for what's typed: with nothing typed, every label not on the
-/// task yet. Enter adds what's typed (like before there was a list); ↑ ↓
+/// The task form's way to add labels, a [PickerDropdown]: [builder] makes
+/// the labels' row, with what opens the box (the + after the labels, or
+/// "Add label"). The box lists [options] for what's typed: with nothing
+/// typed, every label not on the task yet. Enter adds what's typed; ↑ ↓
 /// then Enter, or a click, adds a listed one. A new label gets the color
-/// picked in the swatches under "Create". The list is worked out
-/// afresh on every build, so it's never stale after adding a label.
+/// picked in the swatches under "Create". The list is worked out afresh on
+/// every build, so it's never stale after adding a label.
 class LabelField extends StatefulWidget {
   const LabelField({
     super.key,
@@ -49,6 +52,7 @@ class LabelField extends StatefulWidget {
     required this.projectId,
     required this.options,
     required this.onAdd,
+    required this.builder,
   });
 
   final TextEditingController controller;
@@ -62,23 +66,15 @@ class LabelField extends StatefulWidget {
   /// one in [color] (a [labelPalette] index) when given.
   final void Function(String text, {int? color}) onAdd;
 
+  /// The row the box opens under; its toggle opens (and, clicked again,
+  /// closes) the box.
+  final Widget Function(BuildContext context, VoidCallback toggle) builder;
+
   @override
   State<LabelField> createState() => _LabelFieldState();
 }
 
 class _LabelFieldState extends State<LabelField> {
-  final _portal = OverlayPortalController();
-  final _link = LayerLink();
-
-  /// The listed option ↑ ↓ moved to; null until they're used (Enter then
-  /// adds what's typed).
-  int? _highlight;
-
-  /// Escape closed the list; it opens again on typing or refocusing.
-  bool _dismissed = false;
-
-  String _lastText = '';
-
   /// The color picked for a new label; null for its default.
   int? _newColor;
 
@@ -88,148 +84,65 @@ class _LabelFieldState extends State<LabelField> {
   @override
   void initState() {
     super.initState();
-    widget.focusNode.addListener(_onFocus);
     widget.controller.addListener(_onText);
-    if (widget.focusNode.hasFocus) _portal.show();
   }
 
   @override
   void dispose() {
-    widget.focusNode.removeListener(_onFocus);
     widget.controller.removeListener(_onText);
     super.dispose();
   }
 
-  void _onFocus() {
-    if (!mounted) return;
-    final focused = widget.focusNode.hasFocus;
-    setState(() {
-      _dismissed = false;
-      _highlight = null;
-    });
-    if (focused && !_portal.isShowing) {
-      _portal.show();
-    } else if (!focused && _portal.isShowing) {
-      _portal.hide();
-    }
-  }
-
   void _onText() {
-    if (widget.controller.text == _lastText) return;
-    _lastText = widget.controller.text;
-    setState(() {
-      _dismissed = false;
-      _highlight = null;
-      if (widget.controller.text.trim().isEmpty) _newColor = null;
-    });
+    if (widget.controller.text.trim().isEmpty && _newColor != null) {
+      setState(() => _newColor = null);
+    }
   }
 
   /// Adds [text]; when it's a new label, in the picked color.
   void _add(String text, {bool isNew = false}) {
     final color = isNew ? _createColor : null;
-    setState(() {
-      _highlight = null;
-      _newColor = null;
-    });
+    setState(() => _newColor = null);
     widget.onAdd(text, color: color);
   }
 
   void _pick(LabelOption o) => _add(o.label, isNew: o.isNew);
 
-  KeyEventResult _onKey(FocusNode node, KeyEvent event, int count) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-      return KeyEventResult.ignored;
-    }
-    if (count == 0 || _dismissed) return KeyEventResult.ignored;
-    switch (event.logicalKey) {
-      case LogicalKeyboardKey.arrowDown:
-        setState(() => _highlight = ((_highlight ?? -1) + 1) % count);
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.arrowUp:
-        setState(() => _highlight = ((_highlight ?? count) - 1) % count);
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.escape:
-        // Closes the list only; the next Escape closes the form.
-        setState(() => _dismissed = true);
-        return KeyEventResult.handled;
-      default:
-        return KeyEventResult.ignored;
-    }
-  }
-
   @override
-  Widget build(BuildContext context) {
-    final options = widget.options(widget.controller.text);
-    final highlight = _highlight != null && _highlight! < options.length
-        ? _highlight
-        : null;
-    final showList = !_dismissed && options.isNotEmpty;
-    return CompositedTransformTarget(
-      link: _link,
-      child: OverlayPortal(
-        controller: _portal,
-        overlayChildBuilder: (_) => !showList
-            ? const SizedBox.shrink()
-            : CompositedTransformFollower(
-                link: _link,
-                targetAnchor: Alignment.bottomLeft,
-                offset: const Offset(0, 4),
-                child: Align(
-                  alignment: Alignment.topLeft,
-                  // Clicks in the list keep the field focused.
-                  child: TextFieldTapRegion(
-                    child: _LabelList(
-                      options: options,
-                      highlight: highlight,
-                      onPick: _pick,
-                      projectId: widget.projectId,
-                      createColor: _createColor,
-                      onColor: (c) => setState(() => _newColor = c),
-                    ),
-                  ),
-                ),
-              ),
-        child: Focus(
-          onKeyEvent: (node, event) => _onKey(node, event, options.length),
-          child: SizedBox(
-            width: 200,
-            child: TextField(
-              // Never scrolls (or bounces) on its own: a swipe over it
-              // scrolls the form instead.
-              scrollPhysics: const NeverScrollableScrollPhysics(),
-              controller: widget.controller,
-              focusNode: widget.focusNode,
-              inputFormatters: const [LabelLengthFormatter()],
-              style: const TextStyle(fontSize: 13),
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: 'Add label, press Enter',
-                hintStyle: TextStyle(color: context.colors.placeholder),
-                border: InputBorder.none,
-              ),
-              // Keeps focus after Enter, to add another.
-              onEditingComplete: () {},
-              onSubmitted: (text) {
-                if (highlight != null && showList) {
-                  _pick(options[highlight]);
-                } else if (text.trim().isNotEmpty) {
-                  _add(text, isNew: options.firstOrNull?.isNew ?? false);
-                } else {
-                  widget.focusNode.requestFocus();
-                }
-              },
-              onChanged: (v) {
-                if (v.contains(',')) _add(v);
-              },
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => PickerDropdown(
+    controller: widget.controller,
+    focusNode: widget.focusNode,
+    hint: 'Find or create label',
+    inputFormatters: const [LabelLengthFormatter()],
+    count: (text) => widget.options(text).length,
+    list: (context, text, highlight) {
+      final options = widget.options(text);
+      if (options.isEmpty) return null;
+      return _LabelList(
+        options: options,
+        highlight: highlight,
+        onPick: _pick,
+        projectId: widget.projectId,
+        createColor: _createColor,
+        onColor: (c) => setState(() => _newColor = c),
+      );
+    },
+    onSubmitted: (text, highlight) {
+      final options = widget.options(text);
+      if (highlight != null) {
+        _pick(options[highlight]);
+      } else if (text.trim().isNotEmpty) {
+        _add(text, isNew: options.firstOrNull?.isNew ?? false);
+      }
+    },
+    onChanged: (v) {
+      if (v.contains(',')) _add(v);
+    },
+    builder: widget.builder,
+  );
 }
 
-/// The list under the label field: each label as its chip, the
+/// The labels in the box, under its field: each label as its chip, the
 /// [highlight]ed one (↑ ↓) shaded.
 class _LabelList extends StatelessWidget {
   const _LabelList({
@@ -250,82 +163,51 @@ class _LabelList extends StatelessWidget {
   final ValueChanged<int> onColor;
 
   @override
-  Widget build(BuildContext context) => Material(
-    color: context.colors.surface,
-    shape: RoundedRectangleBorder(
-      borderRadius: formRadius,
-      side: BorderSide(color: context.colors.cardBorder),
-    ),
-    elevation: 4,
-    child: ConstrainedBox(
-      constraints: const BoxConstraints(
-        maxHeight: 240,
-        minWidth: 200,
-        maxWidth: 280,
-      ),
-      child: ListView.builder(
-        padding: const EdgeInsets.all(4),
-        shrinkWrap: true,
-        itemCount: options.length,
-        itemBuilder: (context, i) {
-          final option = options[i];
-          final active = i == highlight;
-          if (active) {
-            // Keeps the highlighted one in view as ↑ ↓ move it.
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (context.mounted) {
-                Scrollable.ensureVisible(context, alignment: 0.5);
-              }
-            });
-          }
-          final item = InkWell(
-            borderRadius: formRadius,
-            onTap: () => onPick(option),
-            child: Container(
-              decoration: BoxDecoration(
-                color: active ? context.colors.hover : null,
-                borderRadius: formRadius,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              child: option.isNew
-                  ? Row(
-                      mainAxisSize: MainAxisSize.min,
-                      spacing: 6,
-                      children: [
-                        Icon(
-                          Symbols.add,
-                          size: 14,
-                          color: context.colors.mutedText,
-                        ),
-                        const Text('Create', style: TextStyle(fontSize: 13)),
-                        Flexible(
-                          child: LabelChip(
-                            option.label,
-                            projectId: projectId,
-                            color: labelPalette[createColor],
-                          ),
-                        ),
-                      ],
-                    )
-                  : Align(
-                      alignment: Alignment.centerLeft,
-                      child: LabelChip(option.label, projectId: projectId),
+  Widget build(BuildContext context) => PickerList(
+    itemCount: options.length,
+    itemBuilder: (context, i) {
+      final option = options[i];
+      final item = PickerItem(
+        active: i == highlight,
+        onTap: () => onPick(option),
+        child: option.isNew
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                spacing: 6,
+                children: [
+                  Icon(Symbols.add, size: 14, color: context.colors.mutedText),
+                  const Text('Create', style: TextStyle(fontSize: 13)),
+                  Flexible(
+                    child: LabelChip(
+                      option.label,
+                      projectId: projectId,
+                      color: labelPalette[createColor],
+                      fontSize: formChipFontSize,
                     ),
-            ),
-          );
-          if (!option.isNew) return item;
-          // The new label's color, under "Create".
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              item,
-              _Swatches(selected: createColor, onSelected: onColor),
-              Divider(height: 9, color: context.colors.cardBorder),
-            ],
-          );
-        },
-      ),
-    ),
+                  ),
+                ],
+              )
+            : Align(
+                alignment: Alignment.centerLeft,
+                child: LabelChip(
+                  option.label,
+                  projectId: projectId,
+                  fontSize: formChipFontSize,
+                ),
+              ),
+      );
+      if (!option.isNew) return item;
+      // The new label's color, under "Create".
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          item,
+          _Swatches(selected: createColor, onSelected: onColor),
+          if (i < options.length - 1)
+            Divider(height: 9, color: context.colors.cardBorder),
+        ],
+      );
+    },
   );
 }
 

@@ -1,3 +1,9 @@
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -5,6 +11,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../app_theme.dart';
 import '../widgets/frosted_bar.dart';
 import 'task.dart';
+import 'task_editor.dart' show taskEditorWidth;
 import 'task_repository.dart';
 import 'tasks_page.dart' show TaskCardBuilder;
 import '../widgets/bottom_fade.dart';
@@ -32,7 +39,12 @@ class TaskBoard extends StatelessWidget {
     required this.onDeleteColumn,
     required this.onAddColumn,
     this.editingColumnId,
+    this.openTask,
   });
+
+  /// The task open in the form: its column scrolls to show its card
+  /// (opened from a reminder, search or Activity, it may be out of view).
+  final ValueListenable<String?>? openTask;
 
   /// The project's tasks as placed on its board (every status is one of
   /// [columns]).
@@ -91,6 +103,7 @@ class TaskBoard extends StatelessWidget {
                     ? null
                     : () => onDeleteColumn(column),
                 startEditing: column.id == editingColumnId,
+                openTask: openTask,
               ),
             ),
           // Dropping a column here moves it to the end.
@@ -205,8 +218,10 @@ class _BoardColumn extends StatelessWidget {
     required this.onRename,
     required this.onDelete,
     required this.startEditing,
+    required this.openTask,
   });
 
+  final ValueListenable<String?>? openTask;
   final TaskColumn column;
   final List<Task> tasks;
   final TaskRepository repo;
@@ -308,26 +323,42 @@ class _BoardColumn extends StatelessWidget {
                   // out yet, and cards vary a lot (images, labels,
                   // subtasks), so its guess, and the thumb, kept changing
                   // as it scrolled.
-                  builder: (controller) => SingleChildScrollView(
+                  //
+                  // A sliver scroll view, not a SingleChildScrollView: that
+                  // one snaps back from the Mac's stretch past the end
+                  // whenever it's laid out again, and a card's hover
+                  // changing (the pointer over the gap between cards) lays
+                  // it out, so the scrollbar jumped mid-stretch.
+                  builder: (controller) => CustomScrollView(
                     controller: controller,
-                    // Room to scroll the last card up out of the fade.
-                    padding: const EdgeInsets.only(bottom: bottomFadeHeight),
-                    // Painted once and moved as it scrolls, instead of
-                    // every card repainted each frame. Each card is its
-                    // own layer too (as a ListView makes them), so a
-                    // card changing (hover) repaints only that card.
-                    child: RepaintBoundary(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (final task in tasks)
-                            RepaintBoundary(child: _cardSlot(task)),
-                          if (candidates.isNotEmpty) const _DropIndicator(),
-                          if (tasks.isEmpty && candidates.isEmpty)
-                            const _EmptyHint(),
-                        ],
+                    // As tall as the cards, like the column's area allows.
+                    shrinkWrap: true,
+                    slivers: [
+                      SliverPadding(
+                        // Room to scroll the last card up out of the fade.
+                        padding: const EdgeInsets.only(
+                          bottom: bottomFadeHeight,
+                        ),
+                        sliver: SliverToBoxAdapter(
+                          // Painted once and moved as it scrolls, instead
+                          // of every card repainted each frame.
+                          child: RepaintBoundary(
+                            child: _CardList(
+                              controller: controller,
+                              tasks: tasks,
+                              slot: _cardSlot,
+                              openTask: openTask,
+                              trailing: [
+                                if (candidates.isNotEmpty)
+                                  const _DropIndicator(),
+                                if (tasks.isEmpty && candidates.isEmpty)
+                                  const _EmptyHint(),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
               ),
@@ -722,4 +753,342 @@ class _EmptyHint extends StatelessWidget {
       style: TextStyle(fontSize: 12.5, color: context.colors.mutedText),
     ),
   );
+}
+
+/// A column's cards, every one taking its real height (so the column's
+/// height, and the scrollbar, are exact: no jitter), but only the cards
+/// in or near view are built. The rest are empty boxes of the height
+/// their card had when it was last laid out. Without this, anything that
+/// rebuilds every card (a theme change: each of its animation's frames)
+/// costs as much as the whole column, hundreds of cards on a big project.
+///
+/// A card is built (and measured) when it's near the view; cards never
+/// measured are built a batch a frame until all are.
+class _CardList extends StatefulWidget {
+  const _CardList({
+    required this.controller,
+    required this.tasks,
+    required this.slot,
+    required this.trailing,
+    required this.openTask,
+  });
+
+  /// When it's one of [tasks], its card is scrolled into view.
+  final ValueListenable<String?>? openTask;
+  final ScrollController controller;
+  final List<Task> tasks;
+  final Widget Function(Task task) slot;
+  final List<Widget> trailing;
+
+  @override
+  State<_CardList> createState() => _CardListState();
+}
+
+class _CardListState extends State<_CardList> {
+  /// Which half-screen the view is at: rebuilt when it moves to another.
+  int _band = -1;
+  bool _remeasured = false;
+  Timer? _measureTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_scrolled);
+    widget.openTask?.addListener(_onOpenTask);
+    // Measuring waits until the board has faded in (see _measureDelay).
+    _measureTimer = Timer(_measureDelay, () {
+      if (mounted) setState(() {});
+    });
+    // A task opened before this column was built (switching projects: a
+    // big project's board comes a frame after the task opens): its card
+    // is revealed once the column's laid out.
+    if (widget.openTask?.value != null) _onOpenTask();
+  }
+
+  /// Waits for the form to finish sliding in before scrolling: both at
+  /// once was choppy.
+  Timer? _revealTimer;
+
+  /// How long the form takes to open, and a little more.
+  static const _afterFormOpens = Duration(milliseconds: 260);
+
+  void _onOpenTask() {
+    _revealTimer?.cancel();
+    final id = widget.openTask?.value;
+    if (id == null || !widget.tasks.any((t) => t.id == id)) return;
+    _revealTimer = Timer(_afterFormOpens, () {
+      if (mounted && widget.openTask?.value == id) _reveal();
+    });
+  }
+
+  /// Tries again next frame, a few times, while the column isn't laid
+  /// out yet.
+  void _revealAfterLayout([int tries = 3]) {
+    if (tries <= 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _reveal(tries - 1);
+    });
+  }
+
+  @override
+  void didUpdateWidget(_CardList old) {
+    super.didUpdateWidget(old);
+    if (old.controller != widget.controller) {
+      old.controller.removeListener(_scrolled);
+      widget.controller.addListener(_scrolled);
+    }
+    if (old.openTask != widget.openTask) {
+      old.openTask?.removeListener(_onOpenTask);
+      widget.openTask?.addListener(_onOpenTask);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_scrolled);
+    widget.openTask?.removeListener(_onOpenTask);
+    _revealTimer?.cancel();
+    _measureTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Room left above or below a card scrolled into view.
+  static const _revealMargin = 24.0;
+
+  /// The open task's card, when it's in this column: the board scrolls
+  /// sideways to the column if it's off screen, and the column to the
+  /// card. Cards out of view aren't built, but every one's place is known
+  /// (its last height), so it's worked out from those.
+  void _reveal([int tries = 3]) {
+    final id = widget.openTask?.value;
+    if (id == null) return;
+    final index = widget.tasks.indexWhere((t) => t.id == id);
+    if (index < 0) return;
+    final p = _position;
+    if (p == null || !p.hasViewportDimension) {
+      _revealAfterLayout(tries);
+      return;
+    }
+    var top = 0.0;
+    for (final t in widget.tasks.take(index)) {
+      top += _cardHeights[t.id] ?? _guessedHeight;
+    }
+    final bottom = top + (_cardHeights[id] ?? _guessedHeight);
+    final height = p.viewportDimension;
+    // Already in view (a card clicked on): stays put.
+    final target = top < p.pixels
+        ? top - _revealMargin
+        : bottom > p.pixels + height - bottomFadeHeight
+        ? bottom - height + bottomFadeHeight + _revealMargin
+        : null;
+    const duration = Duration(milliseconds: 300);
+    if (target != null) {
+      final to = target.clamp(p.minScrollExtent, p.maxScrollExtent);
+      // A long way off: straight to half a screen short of it, then the
+      // rest smoothly. Scrolling past every card in between built each
+      // screenful of them on the way, which stuttered.
+      final near = height / 2;
+      if ((to - p.pixels).abs() > near) {
+        p.jumpTo(to > p.pixels ? to - near : to + near);
+      }
+      p.animateTo(to, duration: duration, curve: Curves.easeOutCubic);
+    }
+    // The board sideways, to the column, if it's off either edge.
+    final scrollable = Scrollable.maybeOf(context, axis: Axis.horizontal);
+    final view = scrollable?.context.findRenderObject();
+    final column = context.findRenderObject();
+    if (scrollable == null || view is! RenderBox || column is! RenderBox) {
+      return;
+    }
+    final board = scrollable.position;
+    final left = column.localToGlobal(Offset.zero).dx;
+    final right = left + column.size.width;
+    final viewLeft = view.localToGlobal(Offset.zero).dx;
+    // Clear of the form, which slides in over the board's right side
+    // (unless the board's too narrow beside it).
+    final viewRight = math.max(
+      viewLeft + column.size.width + _revealMargin * 2,
+      viewLeft + view.size.width - taskEditorWidth,
+    );
+    final shift = left < viewLeft
+        ? left - viewLeft - _revealMargin
+        : right > viewRight
+        ? right - viewRight + _revealMargin
+        : null;
+    if (shift != null) {
+      board.animateTo(
+        (board.pixels + shift).clamp(
+          board.minScrollExtent,
+          board.maxScrollExtent,
+        ),
+        duration: duration,
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  ScrollPosition? get _position =>
+      widget.controller.hasClients ? widget.controller.position : null;
+
+  int _bandOf(ScrollPosition p) =>
+      (p.pixels / (p.viewportDimension / 2)).floor();
+
+  void _scrolled() {
+    final p = _position;
+    if (p == null || !p.hasViewportDimension) return;
+    if (_bandOf(p) != _band) setState(() {});
+  }
+
+  /// A card's height changed (or it was measured for the first time):
+  /// once this frame is done, work out again which cards are in view.
+  void _measured(String id, double height) {
+    if (_cardHeights[id] == height) return;
+    _cardHeights[id] = height;
+    if (_remeasured) return;
+    _remeasured = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _remeasured = false;
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = _position;
+    final laidOut = p != null && p.hasViewportDimension;
+    // In view, plus a screen above and below: built. Before the column's
+    // been laid out (opening a project), just the first screen's worth.
+    final screen = laidOut
+        ? p.viewportDimension
+        : MediaQuery.sizeOf(context).height;
+    if (laidOut) _band = _bandOf(p);
+    final from = laidOut ? p.pixels - screen : 0.0;
+    final to = laidOut ? p.pixels + screen * 2 : screen;
+    var y = 0.0;
+    var batch = 0;
+    // Measuring cards out of view: not while the board fades in, and a
+    // few a frame for the whole board (not per column).
+    final measuring = _measureTimer?.isActive != true;
+    var waiting = false, starved = false;
+    // Cards not built stand in as empty space: each run of them one box
+    // (their heights added up), not a box each. A big column is then a
+    // few dozen widgets, not thousands, so rebuilding it (every frame
+    // while cards are measured after opening) stays cheap.
+    final children = <Widget>[];
+    var gap = 0.0;
+    void endGap() {
+      if (gap > 0) children.add(SizedBox(height: gap));
+      gap = 0;
+    }
+
+    for (final task in widget.tasks) {
+      final top = y;
+      final known = _cardHeights[task.id];
+      final height = known ?? _guessedHeight;
+      y += height;
+      final near = top + height >= from && top <= to;
+      // Cards never measured are built a few per frame (measured where
+      // they stand, out of view), so a big project opens straight away
+      // and its height is exact a moment later.
+      var measureNow = false;
+      if (laidOut && known == null && !near && batch < _batchSize) {
+        if (!measuring) {
+          waiting = true;
+        } else if (_takeMeasureBudget()) {
+          measureNow = true;
+          batch++;
+        } else {
+          starved = true;
+        }
+      }
+      if (!near && !measureNow) {
+        gap += height;
+        continue;
+      }
+      endGap();
+      children.add(
+        _Measured(
+          key: ValueKey(task.id),
+          onHeight: (h) => _measured(task.id, h),
+          // Its own layer, so a card changing (hover) repaints only it.
+          child: RepaintBoundary(child: widget.slot(task)),
+        ),
+      );
+    }
+    endGap();
+    // Out of this frame's measuring: again next frame.
+    if (starved && !waiting) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [...children, ...widget.trailing],
+    );
+  }
+}
+
+/// Every card's height when it was last laid out, by task id: kept
+/// across projects and columns (cards are all [_columnWidth] wide), so a
+/// project opened before is the right height straight away.
+final _cardHeights = <String, double>{};
+
+/// Standing in for a card that hasn't been measured yet.
+const _guessedHeight = 110.0;
+
+/// How many unmeasured, out-of-view cards a column builds (to measure) a
+/// frame, at most.
+const _batchSize = 4;
+
+/// How many a frame for the whole board: building and dropping cards to
+/// measure them, four in every column at once, made each frame of the
+/// board's opening take 20 to 40ms.
+const _boardMeasureBudget = 4;
+
+/// No measuring until the board has faded in (250ms) and settled.
+const _measureDelay = Duration(milliseconds: 400);
+
+/// What's left of [_boardMeasureBudget] this frame; refilled for the
+/// next frame once this one's done.
+int _measureBudgetLeft = 0;
+bool _measureBudgetTaken = false;
+
+/// Takes one card from this frame's measuring budget; false when spent.
+bool _takeMeasureBudget() {
+  if (!_measureBudgetTaken) {
+    _measureBudgetTaken = true;
+    _measureBudgetLeft = _boardMeasureBudget;
+    SchedulerBinding.instance.addPostFrameCallback(
+      (_) => _measureBudgetTaken = false,
+    );
+  }
+  if (_measureBudgetLeft <= 0) return false;
+  _measureBudgetLeft--;
+  return true;
+}
+
+/// Reports its child's height each time it's laid out.
+class _Measured extends SingleChildRenderObjectWidget {
+  const _Measured({super.key, required this.onHeight, super.child});
+  final ValueChanged<double> onHeight;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderMeasured(onHeight);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderMeasured r) =>
+      r.onHeight = onHeight;
+}
+
+class _RenderMeasured extends RenderProxyBox {
+  _RenderMeasured(this.onHeight);
+  ValueChanged<double> onHeight;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    onHeight(size.height);
+  }
 }

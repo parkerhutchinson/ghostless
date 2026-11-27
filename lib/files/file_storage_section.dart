@@ -147,9 +147,7 @@ Future<void> _showConnect(
     files: files,
     // From the database's username (postgres.<ref>), when it's Supabase.
     suggestedUrl: switch (sync?.current?.config) {
-      final PostgresConfig db => StorageConfig.urlFromDatabaseUser(
-        db.username,
-      ),
+      final PostgresConfig db => StorageConfig.urlFromDatabaseUser(db.username),
       _ => null,
     },
   ),

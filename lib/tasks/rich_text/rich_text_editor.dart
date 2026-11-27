@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import 'package:flutter/rendering.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -417,7 +420,19 @@ class RichTextEditor extends StatefulWidget {
     this.focusNode,
     this.bordered = true,
     this.padding,
+    this.toolsWhileEditing = false,
+    this.idleLift = 0,
   });
+
+  /// How much less space there is above it while the toolbar's hidden
+  /// ([toolsWhileEditing]): it moves up by this (even past its own top
+  /// margin, into the hidden toolbar's room), and back down as the
+  /// toolbar fades in.
+  final double idleLift;
+
+  /// The toolbar and outline fade in only while it's being edited
+  /// (focused) and fade out after (the task form's description).
+  final bool toolsWhileEditing;
 
   /// Space around the text inside the outline; the field's usual when
   /// null.
@@ -453,6 +468,20 @@ class _RichTextEditorState extends State<RichTextEditor> {
 
   bool _has(RichTextTool t) => widget.tools.contains(t);
 
+  /// While the heading menu or the link dialog is open: focus is away
+  /// from the text, but it's still being edited.
+  bool _holding = false;
+
+  void _hold(bool on) {
+    if (mounted && _holding != on) setState(() => _holding = on);
+  }
+
+  /// The toolbar and outline showing: always, or while it's edited.
+  bool get _tools => !widget.toolsWhileEditing || _focus.hasFocus || _holding;
+
+  /// Whether the toolbar and outline showed last build.
+  bool? _shown;
+
   @override
   void dispose() {
     _ownFocus.dispose();
@@ -463,12 +492,14 @@ class _RichTextEditorState extends State<RichTextEditor> {
 
   Future<void> _editLink() async {
     final link = _c.currentLink;
+    _hold(true);
     final result = await showDialog<_LinkResult>(
       context: context,
       barrierColor: Colors.black54,
       builder: (_) => _LinkDialog(url: link?.url),
     );
     if (!mounted) return;
+    _hold(false);
     switch (result) {
       case _LinkSet(:final url):
         _c.setLink(url);
@@ -480,8 +511,36 @@ class _RichTextEditorState extends State<RichTextEditor> {
     _focus.requestFocus();
   }
 
+  /// How long the toolbar and outline take to fade (the outline's is the
+  /// text field's own border animation, the same length).
+  static const _fade = Duration(milliseconds: 167);
+
+  // Rebuilt as focus comes and goes (the toolbar and outline follow it).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: _focus,
+    builder: (context, _) => _build(context),
+  );
+
+  Widget _build(BuildContext context) {
+    // While its form closes (its route no longer on top), left as it
+    // is: clicking out of the form blurs it too, and fading the toolbar
+    // and moving the text then laid the whole form out again every
+    // frame of the form sliding away, which stuttered.
+    final shown = ModalRoute.isCurrentOf(context) == false ? _shown : null;
+    final tools = _shown = shown ?? _tools;
+    // Unfocused and hidden: the outline is still there, just clear, so
+    // the text doesn't move and the field's border animation fades it.
+    final border = context.colors.fieldBorder;
+    final enabledBorder = !widget.bordered
+        ? InputBorder.none
+        : tools
+        ? border
+        : border.copyWith(
+            borderSide: border.borderSide.copyWith(
+              color: border.borderSide.color.withValues(alpha: 0),
+            ),
+          );
     return CallbackShortcuts(
       bindings: {
         if (_has(RichTextTool.bold))
@@ -509,61 +568,93 @@ class _RichTextEditorState extends State<RichTextEditor> {
         const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true):
             _c.redo,
       },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        spacing: 6,
-        children: [
-          // Counts as part of the field: clicking it doesn't unfocus it.
-          TextFieldTapRegion(
-            child: Padding(
-              padding: widget.bordered
-                  ? EdgeInsets.zero
-                  : const EdgeInsets.fromLTRB(6, 6, 6, 0),
-              child: ListenableBuilder(
-                listenable: _c,
-                builder: (context, _) => _toolbar(context),
-              ),
-            ),
-          ),
-          Focus(
-            // Return and Shift-Return, before the text field inserts a
-            // plain "\n" (except while composing, e.g. a Japanese IME).
-            canRequestFocus: false,
-            skipTraversal: true,
-            onKeyEvent: _onKey,
-            child: TextField(
-              controller: _c,
-              focusNode: _focus,
-              // Never scrolls (or bounces) on its own: a swipe over it
-              // scrolls the form instead.
-              scrollPhysics: const NeverScrollableScrollPhysics(),
-              style: TextStyle(fontSize: widget.fontSize),
-              // Grows with its text rather than scrolling inside.
-              minLines: widget.minLines,
-              maxLines: null,
-              keyboardType: TextInputType.multiline,
-              decoration: InputDecoration(
-                hintText: widget.hintText,
-                hintStyle: TextStyle(
-                  fontSize: widget.fontSize,
-                  color: context.colors.placeholder,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(end: tools ? 0 : -widget.idleLift),
+        duration: _fade,
+        curve: Curves.easeInOut,
+        builder: (context, top, child) => _TopInset(top: top, child: child),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: 6,
+          children: [
+            // Counts as part of the field: clicking it doesn't unfocus it.
+            TextFieldTapRegion(
+              child: Padding(
+                padding: widget.bordered
+                    ? EdgeInsets.zero
+                    : const EdgeInsets.fromLTRB(6, 6, 6, 0),
+                // Faded out, it keeps its room, so the text doesn't jump.
+                child: AnimatedOpacity(
+                  opacity: tools ? 1 : 0,
+                  duration: _fade,
+                  child: IgnorePointer(
+                    ignoring: !tools,
+                    child: ListenableBuilder(
+                      listenable: _c,
+                      builder: (context, _) => _toolbar(context),
+                    ),
+                  ),
                 ),
-                enabledBorder: widget.bordered
-                    ? context.colors.fieldBorder
-                    : InputBorder.none,
-                focusedBorder: widget.bordered ? null : InputBorder.none,
-                border: widget.bordered
-                    ? context.colors.fieldBorder
-                    : InputBorder.none,
-                contentPadding: widget.bordered
-                    ? widget.padding
-                    : const EdgeInsets.fromLTRB(12, 2, 12, 6),
               ),
             ),
-          ),
-        ],
+            Focus(
+              // Return and Shift-Return, before the text field inserts a
+              // plain "\n" (except while composing, e.g. a Japanese IME).
+              canRequestFocus: false,
+              skipTraversal: true,
+              onKeyEvent: _onKey,
+              // The padding inside the outline shrinks away with it (the
+              // text then lines up with the form's edge) and grows back as
+              // it fades in.
+              child: TweenAnimationBuilder<double>(
+                // How much of the padding there is: all of it with the
+                // outline, none without.
+                tween: Tween(end: tools ? 1 : 0),
+                duration: _fade,
+                curve: Curves.easeInOut,
+                builder: (context, shown, _) => TextField(
+                  controller: _c,
+                  focusNode: _focus,
+                  // A click anywhere else leaves it (blurs). The default
+                  // doesn't inside a scrolling form like the task form's, so
+                  // its toolbar and outline would stay.
+                  onTapOutside: (_) => _focus.unfocus(),
+                  // Never scrolls (or bounces) on its own: a swipe over it
+                  // scrolls the form instead.
+                  scrollPhysics: const NeverScrollableScrollPhysics(),
+                  style: TextStyle(fontSize: widget.fontSize),
+                  // Grows with its text rather than scrolling inside.
+                  minLines: widget.minLines,
+                  maxLines: null,
+                  keyboardType: TextInputType.multiline,
+                  decoration: InputDecoration(
+                    hintText: widget.hintText,
+                    hintStyle: TextStyle(
+                      fontSize: widget.fontSize,
+                      color: context.colors.placeholder,
+                    ),
+                    enabledBorder: enabledBorder,
+                    focusedBorder: widget.bordered ? null : InputBorder.none,
+                    border: enabledBorder,
+                    contentPadding: _contentPadding(shown),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  /// The space around the text inside the outline; with
+  /// [RichTextEditor.toolsWhileEditing], [shown] of it (none while the
+  /// outline's hidden). Null: the field's usual.
+  EdgeInsets? _contentPadding(double shown) {
+    if (!widget.bordered) return const EdgeInsets.fromLTRB(12, 2, 12, 6);
+    final padding = widget.padding;
+    if (!widget.toolsWhileEditing || padding == null) return padding;
+    return EdgeInsets.lerp(EdgeInsets.zero, padding, shown);
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
@@ -592,6 +683,8 @@ class _RichTextEditorState extends State<RichTextEditor> {
         if (_has(RichTextTool.heading))
           _HeadingMenu(
             level: _c.headingLevel,
+            onOpen: () => _hold(true),
+            onClose: () => _hold(false),
             onPicked: (level) {
               _c.setHeading(level);
               _focus.requestFocus();
@@ -757,9 +850,15 @@ class _Divider extends StatelessWidget {
 /// The text size picker: Paragraph, or Heading 1 to 3, each shown at its
 /// size in the menu.
 class _HeadingMenu extends StatelessWidget {
-  const _HeadingMenu({required this.level, required this.onPicked});
+  const _HeadingMenu({
+    required this.level,
+    required this.onPicked,
+    required this.onOpen,
+    required this.onClose,
+  });
   final int level;
   final ValueChanged<int> onPicked;
+  final VoidCallback onOpen, onClose;
 
   static String nameOf(int level) =>
       level == 0 ? 'Paragraph' : 'Heading $level';
@@ -768,6 +867,8 @@ class _HeadingMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = context.colors.text;
     return MenuAnchor(
+      onOpen: onOpen,
+      onClose: onClose,
       menuChildren: [
         for (var l = 0; l <= maxHeading; l++)
           // Part of the field too: picking doesn't unfocus it.
@@ -1000,6 +1101,47 @@ class _LinkDialogState extends State<_LinkDialog> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Its child with [top] more room above it; a negative [top] moves the
+/// child up over what's above (its top edge then overhangs), the space it
+/// takes shrinking by as much. Unlike [Padding], which can't go below 0.
+class _TopInset extends SingleChildRenderObjectWidget {
+  const _TopInset({required this.top, super.child});
+  final double top;
+
+  @override
+  _RenderTopInset createRenderObject(BuildContext context) =>
+      _RenderTopInset(top);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderTopInset r) =>
+      r.top = top;
+}
+
+class _RenderTopInset extends RenderShiftedBox {
+  _RenderTopInset(this._top) : super(null);
+
+  double _top;
+  set top(double v) {
+    if (v == _top) return;
+    _top = v;
+    markNeedsLayout();
+  }
+
+  @override
+  void performLayout() {
+    final child = this.child;
+    if (child == null) {
+      size = constraints.smallest;
+      return;
+    }
+    child.layout(constraints.loosen(), parentUsesSize: true);
+    (child.parentData! as BoxParentData).offset = Offset(0, _top);
+    size = constraints.constrain(
+      Size(child.size.width, math.max(0, child.size.height + _top)),
     );
   }
 }
