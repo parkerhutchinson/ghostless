@@ -20,6 +20,10 @@ uniform vec3 u_light;
 // the background's colors.
 uniform float u_amount;
 
+// The scene's fade in, 0 to 1. Applied here because an opacity widget
+// around this filter doesn't reach its output under Impeller.
+uniform float u_opacity;
+
 // Set by the engine: the scene, as drawn.
 uniform sampler2D u_scene;
 
@@ -43,5 +47,5 @@ void main() {
       ? mix(u_shadow, u_mid, lightness * 2.0)
       : mix(u_mid, u_light, (lightness - 0.5) * 2.0);
   vec3 result = mix(rgb, mapped, u_amount);
-  frag_color = vec4(result * color.a, color.a);
+  frag_color = vec4(result * color.a, color.a) * u_opacity;
 }
