@@ -15,7 +15,9 @@ import '../tasks/task.dart';
 import '../tasks/task_editor.dart';
 import '../tasks/task_repository.dart';
 import '../widgets/bottom_fade.dart';
+import '../widgets/fade_in_view.dart';
 import '../widgets/frosted_bar.dart';
+import '../widgets/list_heading.dart';
 import 'activity.dart';
 import 'activity_repository.dart';
 
@@ -203,12 +205,17 @@ class _ActivityPageState extends State<ActivityPage> {
             ),
           ),
           Expanded(
-            child: StreamBuilder<List<Task>>(
-              stream: _tasks,
-              initialData: _tasksAtStart,
-              builder: (context, taskSnap) => _list(context, snap.requireData, {
-                for (final t in taskSnap.requireData) t.id: t,
-              }),
+            // Fades in on opening, like every view (see FadeInView).
+            child: FadeInView(
+              child: StreamBuilder<List<Task>>(
+                stream: _tasks,
+                initialData: _tasksAtStart,
+                builder: (context, taskSnap) => _list(
+                  context,
+                  snap.requireData,
+                  {for (final t in taskSnap.requireData) t.id: t},
+                ),
+              ),
             ),
           ),
         ],
@@ -394,67 +401,44 @@ class _DayHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.only(top: first ? 0 : 20, bottom: 6),
-    child: FrostedHeader(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        child: SizedBox(
-          // As tall as a column heading (its + and ⋯ are 26).
-          height: 26,
-          child: Row(
-            spacing: 8,
-            children: [
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
+    // Space above a day (not the first), none under its heading: the
+    // rows sit right on it.
+    padding: EdgeInsets.only(top: first ? 0 : 20),
+    // The one list heading style (see ListHeading); no line of its own:
+    // the first row's top line is right under it.
+    child: ListHeading(
+      label,
+      count: count,
+      squareCount: true,
+      actions: [
+        TextButton(
+          onPressed: onClear,
+          style:
+              TextButton.styleFrom(
+                foregroundColor: context.colors.text,
+                textStyle: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w400,
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 26),
+                fixedSize: const Size.fromHeight(26),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                shape: const RoundedRectangleBorder(),
+                splashFactory: NoSplash.splashFactory,
+              ).copyWith(
+                overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+                backgroundColor: WidgetStateProperty.resolveWith(
+                  (states) =>
+                      states.contains(WidgetState.hovered) ||
+                          states.contains(WidgetState.pressed)
+                      ? context.colors.card
+                      : null,
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-                decoration: BoxDecoration(color: context.colors.card),
-                child: Text(
-                  '$count',
-                  style: TextStyle(fontSize: 12, color: context.colors.text),
-                ),
-              ),
-              const Spacer(),
-              // At the right, like a column heading's buttons: no fill
-              // until hovered, then the count's shade; square.
-              TextButton(
-                onPressed: onClear,
-                style:
-                    TextButton.styleFrom(
-                      foregroundColor: context.colors.text,
-                      textStyle: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w400,
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      minimumSize: const Size(0, 26),
-                      fixedSize: const Size.fromHeight(26),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      shape: const RoundedRectangleBorder(),
-                      splashFactory: NoSplash.splashFactory,
-                    ).copyWith(
-                      overlayColor: const WidgetStatePropertyAll(
-                        Colors.transparent,
-                      ),
-                      backgroundColor: WidgetStateProperty.resolveWith(
-                        (states) =>
-                            states.contains(WidgetState.hovered) ||
-                                states.contains(WidgetState.pressed)
-                            ? context.colors.card
-                            : null,
-                      ),
-                    ),
-                child: const Text('Clear'),
-              ),
-            ],
-          ),
+          child: const Text('Clear'),
         ),
-      ),
+      ],
     ),
   );
 }

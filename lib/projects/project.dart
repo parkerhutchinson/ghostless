@@ -67,6 +67,27 @@ const projectColorOrder = [
 /// their colors.
 const projectHueCount = 8;
 
+/// How a shared project is going, as its people last set it on its
+/// dashboard. Stored by [name]; a project has none until one is picked.
+enum ProjectStatus {
+  onTrack('On track', Color(0xFF4FB286)),
+  atRisk('At risk', Color(0xFFE6944C)),
+  offTrack('Off track', Color(0xFFE25A5F)),
+  onHold('On hold', Color(0xFF8E9AAF));
+
+  const ProjectStatus(this.label, this.color);
+
+  final String label;
+
+  /// Its mark's color (from [projectColors]): green, amber, red, gray.
+  final Color color;
+
+  /// The status stored as [value] (its [name]); null for none or one this
+  /// version doesn't know.
+  static ProjectStatus? from(Object? value) =>
+      values.where((s) => s.name == value).firstOrNull;
+}
+
 /// A group of tasks (collection `projects`). Tasks point to it by id.
 final class Project {
   const Project({
@@ -80,8 +101,12 @@ final class Project {
     this.labels = const [],
     this.labelColors = const {},
     this.description = '',
+    this.status,
     required this.createdAt,
   });
+
+  /// How it's going (shared projects only); null until one is picked.
+  final ProjectStatus? status;
 
   /// What the project is about, in Markdown (the same subset as a task's
   /// description: see [RichTextModel]). Shown and edited on its dashboard.
@@ -136,6 +161,7 @@ final class Project {
     List<String>? labels,
     Map<String, int>? labelColors,
     String? description,
+    Object? status = _keep,
   }) => Project(
     id: id,
     name: name ?? this.name,
@@ -147,6 +173,7 @@ final class Project {
     labels: labels ?? this.labels,
     labelColors: labelColors ?? this.labelColors,
     description: description ?? this.description,
+    status: identical(status, _keep) ? this.status : status as ProjectStatus?,
     createdAt: createdAt,
   );
 
@@ -164,6 +191,7 @@ final class Project {
     'labels': labels,
     'labelColors': labelColors,
     'description': description,
+    'status': status?.name,
     'createdAt': createdAt.toUtc().toIso8601String(),
   };
 
@@ -182,6 +210,7 @@ final class Project {
           if (key is String && value is num) key: value.toInt(),
     },
     description: json['description'] as String? ?? '',
+    status: ProjectStatus.from(json['status']),
     createdAt:
         DateTime.tryParse(json['createdAt'] as String? ?? '') ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),

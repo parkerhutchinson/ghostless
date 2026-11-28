@@ -38,7 +38,7 @@ Future<void> showSettingsDialog(
 );
 
 /// The Settings window's height: the same on every tab.
-const settingsDialogHeight = 550.0;
+const settingsDialogHeight = 595.0;
 
 /// The Settings tabs.
 enum _Tab { theme, data, export, mcp }
@@ -104,9 +104,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             children: [
               Text(
                 'Settings',
+                // Bold, like a project's header.
                 style:
-                    theme.dialogTheme.titleTextStyle ??
-                    theme.textTheme.headlineSmall,
+                    (theme.dialogTheme.titleTextStyle ??
+                            theme.textTheme.headlineSmall)
+                        ?.copyWith(fontWeight: FontWeight.w700),
               ),
               if (tabs.length > 1)
                 Padding(

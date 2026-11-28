@@ -28,5 +28,8 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Flutter GPU, for the 3D model on the sign-in screen (flutter_scene). -->
+	<key>FLTEnableFlutterGPU</key>
+	<true/>
 </dict>
 </plist>

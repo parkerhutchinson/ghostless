@@ -9,7 +9,9 @@ import '../profiles/profile_repository.dart';
 import '../projects/project.dart';
 import '../projects/project_logo.dart';
 import '../projects/project_repository.dart';
+import '../tasks/form_buttons.dart' show formFieldConstraints;
 import '../tasks/task_repository.dart';
+import '../widgets/selected_text.dart';
 import 'exporter.dart';
 import 'xlsx.dart';
 
@@ -48,6 +50,36 @@ class _ExportSectionState extends State<ExportSection> {
 
   /// What the last export did, shown under the buttons.
   String? _message;
+
+  /// Narrows the list to projects whose names contain it. Ticks on
+  /// projects it hides are kept: the export is still every ticked one.
+  final _search = AppTextController();
+
+  /// The list box, and its height with nothing searched (measured after
+  /// each such layout), kept while searching.
+  final _listBox = GlobalKey();
+  double? _fullHeight;
+
+  void _measureList() {
+    if (_search.text.trim().isNotEmpty) return;
+    final box = _listBox.currentContext?.findRenderObject();
+    if (box is RenderBox && box.hasSize) _fullHeight = box.size.height;
+  }
+
+  List<Project> get _shown {
+    final q = _search.text.trim().toLowerCase();
+    if (q.isEmpty) return _projects;
+    return [
+      for (final p in _projects)
+        if (p.name.toLowerCase().contains(q)) p,
+    ];
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
 
   ExportData _data() {
     final profiles = widget.sources.profiles.all();
@@ -108,7 +140,10 @@ class _ExportSectionState extends State<ExportSection> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final none = _chosen.isEmpty;
-    final all = _chosen.length == _projects.length;
+    final shown = _shown;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measureList());
+    // Select all / none act on the projects the search shows.
+    final all = shown.every((p) => _chosen.contains(p.id));
     Widget button(String label, IconData icon, Future<void> Function() run) =>
         OutlinedButton.icon(
           onPressed: none ? null : run,
@@ -130,15 +165,20 @@ class _ExportSectionState extends State<ExportSection> {
               style: TextStyle(fontSize: 12, color: context.colors.text),
             ),
             const Spacer(),
+            // Stays while searching, even with one match (or none: then
+            // there's nothing for it to do).
             if (_projects.length > 1)
               TextButton(
-                onPressed: () => setState(() {
-                  if (all) {
-                    _chosen.clear();
-                  } else {
-                    _chosen.addAll([for (final p in _projects) p.id]);
-                  }
-                }),
+                onPressed: shown.isEmpty
+                    ? null
+                    : () => setState(() {
+                        final ids = [for (final p in shown) p.id];
+                        if (all) {
+                          _chosen.removeAll(ids);
+                        } else {
+                          _chosen.addAll(ids);
+                        }
+                      }),
                 child: Text(all ? 'Select none' : 'Select all'),
               ),
           ],
@@ -148,59 +188,104 @@ class _ExportSectionState extends State<ExportSection> {
             'No projects to export.',
             style: TextStyle(fontSize: 13, color: context.colors.mutedText),
           )
-        else
+        else ...[
+          TextField(
+            controller: _search,
+            onChanged: (_) => setState(() {}),
+            textAlignVertical: TextAlignVertical.center,
+            style: const TextStyle(fontSize: 13),
+            decoration: InputDecoration(
+              constraints: formFieldConstraints,
+              hintText: 'Search projects',
+              hintStyle: TextStyle(color: context.colors.placeholder),
+              // The same space on every side: 36px tall (as every
+              // one-line field) leaves 10 above and below 13px text, so
+              // 10 at the sides too.
+              isDense: true,
+              contentPadding: const EdgeInsets.all(10),
+              enabledBorder: context.colors.fieldBorder,
+              border: context.colors.fieldBorder,
+              // No highlight when it's clicked into.
+              focusedBorder: context.colors.fieldBorder,
+              suffixIcon: _search.text.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Clear search',
+                      iconSize: 14,
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => setState(_search.clear),
+                      icon: const Icon(Symbols.close),
+                    ),
+            ),
+          ),
           Container(
-            constraints: const BoxConstraints(maxHeight: 200),
+            key: _listBox,
+            // Searching keeps the box the size it has with every project.
+            constraints: _search.text.trim().isNotEmpty && _fullHeight != null
+                ? BoxConstraints.tightFor(height: _fullHeight)
+                : const BoxConstraints(maxHeight: 200),
             decoration: BoxDecoration(
               borderRadius: formRadius,
               border: Border.all(color: context.colors.formBorder),
             ),
-            child: ListView(
-              shrinkWrap: true,
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              children: [
-                for (final p in _projects)
-                  InkWell(
-                    onTap: () => setState(() {
-                      if (!_chosen.remove(p.id)) _chosen.add(p.id);
-                    }),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      child: Row(
-                        spacing: 8,
-                        children: [
-                          Checkbox(
-                            value: _chosen.contains(p.id),
-                            shape: formShape,
-                            activeColor: scheme.primary,
-                            checkColor: scheme.onPrimary,
-                            side: BorderSide(
-                              color: context.colors.mutedText,
-                              width: 1.5,
-                            ),
-                            onChanged: (on) => setState(() {
-                              if (on ?? false) {
-                                _chosen.add(p.id);
-                              } else {
-                                _chosen.remove(p.id);
-                              }
-                            }),
-                          ),
-                          ProjectIcon(project: p, size: 14),
-                          Expanded(
-                            child: Text(
-                              p.name,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                          ),
-                        ],
+            child: shown.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Text(
+                      'No projects match.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: context.colors.mutedText,
                       ),
                     ),
+                  )
+                : ListView(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    children: [
+                      for (final p in shown)
+                        InkWell(
+                          onTap: () => setState(() {
+                            if (!_chosen.remove(p.id)) _chosen.add(p.id);
+                          }),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            child: Row(
+                              spacing: 8,
+                              children: [
+                                Checkbox(
+                                  value: _chosen.contains(p.id),
+                                  shape: formShape,
+                                  activeColor: scheme.primary,
+                                  checkColor: scheme.onPrimary,
+                                  side: BorderSide(
+                                    color: context.colors.mutedText,
+                                    width: 1.5,
+                                  ),
+                                  onChanged: (on) => setState(() {
+                                    if (on ?? false) {
+                                      _chosen.add(p.id);
+                                    } else {
+                                      _chosen.remove(p.id);
+                                    }
+                                  }),
+                                ),
+                                ProjectIcon(project: p, size: 14),
+                                Expanded(
+                                  child: Text(
+                                    p.name,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-              ],
-            ),
           ),
+        ],
         // Across the full width, each the same size.
         Row(
           spacing: 8,

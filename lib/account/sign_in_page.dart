@@ -5,6 +5,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../app_theme.dart';
+import 'sign_in_model.dart';
 import '../layout.dart';
 import '../tasks/form_buttons.dart';
 import '../widgets/selected_text.dart';
@@ -148,189 +149,219 @@ class _SignInPageState extends State<SignInPage> {
       shape: formShape,
       textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(fontSize: 12),
     );
-    return Padding(
-      // Clear of the title bar strip (it drags the window).
-      padding: const EdgeInsets.only(top: titleBarHeight),
-      child: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 360),
-            child: Container(
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: formRadius,
-                border: Border.all(color: colors.cardBorder),
-              ),
-              // The card grows or shrinks to the step's height.
-              child: AnimatedSize(
-                duration: _stepDuration,
-                curve: _stepCurve,
-                alignment: Alignment.topCenter,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _StepSwitcher(
-                      step: sentTo == null,
-                      child: Padding(
-                        key: ValueKey(sentTo == null),
-                        padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
+    // The turning model fills the window, behind the card.
+    return Stack(
+      children: [
+        const Positioned.fill(child: SignInModel()),
+        Padding(
+          // Clear of the title bar strip (it drags the window).
+          padding: const EdgeInsets.only(top: titleBarHeight),
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 360),
+                    child: Container(
+                      clipBehavior: Clip.antiAlias,
+                      decoration: BoxDecoration(
+                        color: colors.surface,
+                        borderRadius: formRadius,
+                        border: Border.all(color: colors.cardBorder),
+                      ),
+                      // The card grows or shrinks to the step's height.
+                      child: AnimatedSize(
+                        duration: _stepDuration,
+                        curve: _stepCurve,
+                        alignment: Alignment.topCenter,
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
-                          spacing: 16,
                           children: [
-                            Text(
-                              sentTo == null ? 'Sign in' : 'Check your email',
-                              style: TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w700,
-                                color: colors.text,
-                              ),
-                            ),
-                            Text(
-                              sentTo == null
-                                  ? 'Enter your email and we’ll send you a code. '
-                                        'New here? This makes your account.'
-                                  : 'Enter the ${HostedService.codeLength}-digit code '
-                                        'we sent to $sentTo.',
-                              style: muted,
-                            ),
-                            // Extra room above and below the field.
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: sentTo == null
-                                  ? _field(
-                                      controller: _email,
-                                      focus: _emailFocus,
-                                      hint: 'you@example.com',
-                                      keyboard: TextInputType.emailAddress,
-                                      onSubmitted: _sendCode,
-                                    )
-                                  : CodeBoxes(
-                                      controller: _code,
-                                      focus: _codeFocus,
-                                      length: HostedService.codeLength,
-                                      enabled: !_busy,
-                                      onChanged: (text) {
-                                        if (_problem != null) {
-                                          setState(() => _problem = null);
-                                        }
-                                        // The whole code typed (or pasted): sign in
-                                        // without a click.
-                                        if (text.length ==
-                                            HostedService.codeLength) {
-                                          _verify();
-                                        }
-                                      },
-                                      onSubmitted: _verify,
-                                    ),
-                            ),
-                            if (_problem case final problem?)
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                spacing: 8,
-                                children: [
-                                  Icon(
-                                    Symbols.error,
-                                    size: 16,
-                                    color: Colors.red.shade300,
-                                  ),
-                                  Expanded(
-                                    child: Text(
-                                      problem,
-                                      style: TextStyle(
-                                        fontSize: 12.5,
-                                        color: colors.text,
-                                        height: 1.4,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            SizedBox(
-                              height: formFieldHeight,
-                              child: FilledButton(
-                                style: formButtonStyle,
-                                onPressed: _busy
-                                    ? null
-                                    : sentTo == null
-                                    ? _sendCode
-                                    : _verify,
-                                child: _busy
-                                    ? const SizedBox.square(
-                                        dimension: 16,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : Text(
-                                        sentTo == null
-                                            ? 'Email me a code'
-                                            : 'Sign in',
-                                      ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    _FooterSwitcher(
-                      child: sentTo == null
-                          ? const SizedBox(
-                              key: ValueKey('none'),
-                              width: double.infinity,
-                            )
-                          // A lighter band across the card's foot.
-                          : ColoredBox(
-                              key: const ValueKey('links'),
-                              color: colors.card,
+                            _StepSwitcher(
+                              step: sentTo == null,
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 28,
-                                  vertical: 12,
+                                key: ValueKey(sentTo == null),
+                                padding: const EdgeInsets.fromLTRB(
+                                  28,
+                                  28,
+                                  28,
+                                  24,
                                 ),
-                                child: Row(
-                                  spacing: 8,
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  spacing: 16,
                                   children: [
-                                    Expanded(
-                                      child: TextButton(
-                                        style: linkStyle,
-                                        onPressed: _busy ? null : _changeEmail,
-                                        child: const Text(
-                                          'Change email',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
+                                    Text(
+                                      sentTo == null
+                                          ? 'Sign in'
+                                          : 'Check your email',
+                                      style: TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w700,
+                                        color: colors.text,
                                       ),
                                     ),
-                                    Expanded(
-                                      child: TextButton(
-                                        style: linkStyle,
-                                        onPressed: _busy || _wait > 0
+                                    Text(
+                                      sentTo == null
+                                          ? 'Enter your email and we’ll send you a code. '
+                                                'New here? This makes your account.'
+                                          : 'Enter the ${HostedService.codeLength}-digit code '
+                                                'we sent to $sentTo.',
+                                      style: muted,
+                                    ),
+                                    // Extra room above and below the field.
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 8,
+                                      ),
+                                      child: sentTo == null
+                                          ? _field(
+                                              controller: _email,
+                                              focus: _emailFocus,
+                                              hint: 'you@example.com',
+                                              keyboard:
+                                                  TextInputType.emailAddress,
+                                              onSubmitted: _sendCode,
+                                            )
+                                          : CodeBoxes(
+                                              controller: _code,
+                                              focus: _codeFocus,
+                                              length: HostedService.codeLength,
+                                              enabled: !_busy,
+                                              onChanged: (text) {
+                                                if (_problem != null) {
+                                                  setState(
+                                                    () => _problem = null,
+                                                  );
+                                                }
+                                                // The whole code typed (or pasted): sign in
+                                                // without a click.
+                                                if (text.length ==
+                                                    HostedService.codeLength) {
+                                                  _verify();
+                                                }
+                                              },
+                                              onSubmitted: _verify,
+                                            ),
+                                    ),
+                                    if (_problem case final problem?)
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        spacing: 8,
+                                        children: [
+                                          Icon(
+                                            Symbols.error,
+                                            size: 16,
+                                            color: Colors.red.shade300,
+                                          ),
+                                          Expanded(
+                                            child: Text(
+                                              problem,
+                                              style: TextStyle(
+                                                fontSize: 12.5,
+                                                color: colors.text,
+                                                height: 1.4,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    SizedBox(
+                                      height: formFieldHeight,
+                                      child: FilledButton(
+                                        style: formButtonStyle,
+                                        onPressed: _busy
                                             ? null
-                                            : _sendCode,
-                                        child: Text(
-                                          _wait > 0
-                                              ? 'Resend in ${_wait}s'
-                                              : 'Resend code',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
+                                            : sentTo == null
+                                            ? _sendCode
+                                            : _verify,
+                                        child: _busy
+                                            ? const SizedBox.square(
+                                                dimension: 16,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                              )
+                                            : Text(
+                                                sentTo == null
+                                                    ? 'Email me a code'
+                                                    : 'Sign in',
+                                              ),
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
                             ),
+                            _FooterSwitcher(
+                              child: sentTo == null
+                                  ? const SizedBox(
+                                      key: ValueKey('none'),
+                                      width: double.infinity,
+                                    )
+                                  // A lighter band across the card's foot.
+                                  : ColoredBox(
+                                      key: const ValueKey('links'),
+                                      color: colors.card,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 28,
+                                          vertical: 12,
+                                        ),
+                                        child: Row(
+                                          spacing: 8,
+                                          children: [
+                                            Expanded(
+                                              child: TextButton(
+                                                style: linkStyle,
+                                                onPressed: _busy
+                                                    ? null
+                                                    : _changeEmail,
+                                                child: const Text(
+                                                  'Change email',
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: TextButton(
+                                                style: linkStyle,
+                                                onPressed: _busy || _wait > 0
+                                                    ? null
+                                                    : _sendCode,
+                                                child: Text(
+                                                  _wait > 0
+                                                      ? 'Resend in ${_wait}s'
+                                                      : 'Resend code',
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
         ),
-      ),
+      ],
     );
   }
 

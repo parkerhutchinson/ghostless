@@ -45,6 +45,7 @@ const appSchema = <String, Map<String, ValueKind>>{
     'labels': ValueKind.stringList,
     'labelColors': ValueKind.object,
     'description': ValueKind.string,
+    'status': ValueKind.string,
     'createdAt': ValueKind.timestamp,
   },
   'tasks': {
@@ -93,6 +94,13 @@ const appSchema = <String, Map<String, ValueKind>>{
   'comments': {
     'taskId': ValueKind.string,
     'authorId': ValueKind.string,
+    'body': ValueKind.string,
+    'createdAt': ValueKind.timestamp,
+  },
+  'status_updates': {
+    'projectId': ValueKind.string,
+    'authorId': ValueKind.string,
+    'status': ValueKind.string,
     'body': ValueKind.string,
     'createdAt': ValueKind.timestamp,
   },

@@ -50,6 +50,52 @@ class FakeAuth implements AuthBackend {
     if (offline) throw const AuthProblem('offline', offline: true);
     return spaces.putIfAbsent(profileId, () => 'space-of-$profileId');
   }
+
+  String? role = 'owner';
+  String? company;
+  final invited = <OrgInvite>[];
+
+  @override
+  Future<OrgStanding> standing() async {
+    if (offline) throw const AuthProblem('offline', offline: true);
+    return (
+      role: role,
+      businessOrgId: company,
+      businessOrgName: company == null ? null : 'Acme',
+    );
+  }
+
+  @override
+  Future<String> createBusinessOrg(String name, String profileId) async {
+    if (company != null) throw const AuthProblem('Already in one.');
+    role = 'owner';
+    return company = 'org-acme';
+  }
+
+  @override
+  Future<List<OrgPerson>> people(String org) async => [
+    (userId: 'user-sam', email: 'sam@example.com', role: role!, profileId: 'p'),
+  ];
+
+  @override
+  Future<List<OrgInvite>> invites(String org) async => [...invited];
+
+  @override
+  Future<void> invite(
+    String org,
+    String email,
+    String role, {
+    String? placeholder,
+  }) async => invited.insert(0, (
+    id: 'i${invited.length}',
+    email: email,
+    role: role,
+    profileId: placeholder,
+  ));
+
+  @override
+  Future<void> cancelInvite(String inviteId) async =>
+      invited.removeWhere((i) => i.id == inviteId);
 }
 
 void main() {
@@ -82,6 +128,108 @@ void main() {
       expect(account.personalOrgId, 'space-of-profile-1');
       expect(accounts.account.value, account);
       expect(accounts.owner?.email, 'sam@example.com');
+    },
+  );
+
+  test('the role: fetched at sign-in, refreshed, kept offline', () async {
+    auth.role = 'member';
+    await service().verifyCode('sam@example.com', '246810');
+    expect(service().account.value?.role, 'member');
+    // Made an admin: picked up on the next launch.
+    auth.role = 'admin';
+    final next = service()..start();
+    await pumpEventQueue();
+    expect(next.account.value?.role, 'admin');
+    // Offline: the last one known stays.
+    auth.offline = true;
+    final offline = service()..start();
+    await pumpEventQueue();
+    expect(offline.account.value?.role, 'admin');
+  });
+
+  test('standingFrom: the business org’s role, else the personal space’s', () {
+    expect(standingFrom([]).role, isNull);
+    expect(
+      standingFrom([
+        {'org_id': 'me', 'kind': 'personal', 'role': 'owner'},
+      ]),
+      (role: 'owner', businessOrgId: null, businessOrgName: null),
+    );
+    expect(
+      standingFrom([
+        {'org_id': 'me', 'kind': 'personal', 'role': 'owner'},
+        {
+          'org_id': 'acme',
+          'kind': 'business',
+          'role': 'member',
+          'orgs': {'name': 'Acme'},
+        },
+      ]),
+      (role: 'member', businessOrgId: 'acme', businessOrgName: 'Acme'),
+    );
+    expect(roleLabel('admin'), 'Admin');
+  });
+
+  test('a company: started, then people invited and cancelled', () async {
+    final accounts = service();
+    await accounts.verifyCode('sam@example.com', '246810');
+    expect(accounts.account.value!.managesCompany, isTrue);
+    expect(
+      () => accounts.invite('a@b.co'),
+      throwsA(isA<AuthProblem>()),
+      reason: 'no company yet',
+    );
+    await expectLater(
+      accounts.createCompany('  '),
+      throwsA(isA<AuthProblem>()),
+    );
+    await accounts.createCompany('Acme');
+    expect(accounts.account.value!.businessOrgId, 'org-acme');
+    expect(accounts.account.value!.businessOrgName, 'Acme');
+    expect(() => accounts.invite('nope'), throwsA(isA<AuthProblem>()));
+    await accounts.invite(
+      ' New@Example.com ',
+      role: 'admin',
+      placeholder: 'profile-jo',
+    );
+    final invites = await accounts.invites();
+    expect(invites.single.email, 'new@example.com');
+    expect(invites.single.profileId, 'profile-jo');
+    expect(invites.single.role, 'admin');
+    await accounts.cancelInvite(invites.single.id);
+    expect(await accounts.invites(), isEmpty);
+    expect((await accounts.people()).single.email, 'sam@example.com');
+  });
+
+  test('a member of a company doesn’t manage it', () async {
+    auth.role = 'member';
+    auth.company = 'org-acme';
+    final accounts = service();
+    await accounts.verifyCode('sam@example.com', '246810');
+    expect(accounts.account.value!.managesCompany, isFalse);
+  });
+
+  test(
+    'the made-up 123456 account gets a pretend company, kept here',
+    () async {
+      final accounts = service();
+      await accounts.verifyCode('sam@example.com', devBypassCode);
+      final account = accounts.account.value!;
+      expect(account.role, 'owner');
+      expect(account.businessOrgName, 'codename');
+      expect((await accounts.people()).single.role, 'owner');
+      await accounts.invite('jo@example.com', placeholder: 'profile-jo');
+      await expectLater(
+        accounts.invite('jo@example.com'),
+        throwsA(isA<AuthProblem>()),
+      );
+      // Across launches.
+      final next = service();
+      final invites = await next.invites();
+      expect(invites.single.profileId, 'profile-jo');
+      await next.cancelInvite(invites.single.id);
+      expect(await next.invites(), isEmpty);
+      expect(auth.invited, isEmpty, reason: 'never reaches the service');
     },
   );
 

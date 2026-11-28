@@ -168,6 +168,24 @@ void main() {
       );
     });
 
+    test('project status: none at first, set and cleared by update', () {
+      final id = (run('create_project', {'name': 'Docs'})! as Map)['id'];
+      expect((run('update_project', {'project': id})! as Map)['status'], null);
+      final set =
+          run('update_project', {'project': id, 'status': 'atRisk'})! as Map;
+      expect(set['status'], 'atRisk');
+      expect(projects.get(id as String)!.status, ProjectStatus.atRisk);
+      // Not given: kept.
+      run('update_project', {'project': id, 'name': 'Handbook'});
+      expect(projects.get(id)!.status, ProjectStatus.atRisk);
+      run('update_project', {'project': id, 'status': null});
+      expect(projects.get(id)!.status, isNull);
+      expect(
+        () => run('update_project', {'project': id, 'status': 'paused'}),
+        throwsA(isA<McpToolError>()),
+      );
+    });
+
     test('wait_for_changes reports a completion, then a move', () async {
       Future<Map> wait(Map<String, Object?> args) async =>
           (await tools.named('wait_for_changes')!.run(args))! as Map;
@@ -274,6 +292,7 @@ void main() {
           (run('create_task', {
                     'project': launch.id,
                     'title': 'T',
+                    'assignee': 'Sam Lee',
                     'dueDate': '2026-12-03',
                     'reminder': 15,
                   })!
@@ -297,6 +316,47 @@ void main() {
         () => run('update_task', {'taskId': id, 'reminder': -5}),
         throwsA(isA<McpToolError>()),
       );
+    });
+
+    test('reminders: only on tasks assigned to me; reassigning drops it', () {
+      profiles.create(name: 'Other', switchTo: false);
+      expect(
+        () => run('create_task', {
+          'project': launch.id,
+          'title': 'Unassigned',
+          'dueDate': '2026-12-03',
+          'reminder': 15,
+        }),
+        throwsA(isA<McpToolError>()),
+      );
+      expect(
+        () => run('create_task', {
+          'project': launch.id,
+          'title': 'Theirs',
+          'assignee': 'Other',
+          'dueDate': '2026-12-03',
+          'reminder': 15,
+        }),
+        throwsA(isA<McpToolError>()),
+      );
+      final id =
+          (run('create_task', {
+                    'project': launch.id,
+                    'title': 'Mine',
+                    'assignee': 'Sam Lee',
+                    'dueDate': '2026-12-03',
+                    'reminder': 15,
+                  })!
+                  as Map)['id']!
+              as String;
+      run('update_task', {'taskId': id, 'assignee': 'Other'});
+      expect(tasks.get(id)!.reminder, isNull, reason: 'not theirs');
+      expect(
+        () => run('update_task', {'taskId': id, 'reminder': 30}),
+        throwsA(isA<McpToolError>()),
+      );
+      // Clearing one is always allowed.
+      run('update_task', {'taskId': id, 'reminder': null});
     });
 
     test('move_task, subtasks and search', () {

@@ -197,6 +197,10 @@ extension AppColorsContext on BuildContext {
       Theme.of(this).extension<AppColors>() ?? AppColors.from(surfaceColor);
 }
 
+/// The app's font, Inter, bundled in `assets/fonts/` (see pubspec.yaml)
+/// so it works offline. Set once on the theme; never per widget.
+const appFontFamily = 'Inter';
+
 /// The app's theme: [accent] for highlights, and surfaces and borders from
 /// [base] (see [AppColors]). Button, chip, input and toggle shapes come from
 /// here, so new controls get the form style automatically.
@@ -209,6 +213,9 @@ ThemeData buildAppTheme({
   final onAccent = onAccentColor(accent);
   final brightness = colors.isLight ? Brightness.light : Brightness.dark;
   final theme = ThemeData(
+    // Every text style in the theme (text theme, buttons, inputs, menus)
+    // uses it; Material Symbols icons keep their own icon font.
+    fontFamily: appFontFamily,
     brightness: brightness,
     scaffoldBackgroundColor: base,
     extensions: [colors],

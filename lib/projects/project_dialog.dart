@@ -9,6 +9,7 @@ import 'project_logo.dart';
 import '../app_theme.dart';
 import '../tasks/form_buttons.dart';
 import '../tasks/rich_text/rich_text_editor.dart';
+import '../widgets/pane_dialog.dart';
 import '../widgets/selected_text.dart';
 
 /// What the project dialog returns: the name, color, logo (null for
@@ -22,17 +23,20 @@ typedef ProjectDialogResult = ({
 });
 
 /// Asks for a project's name, color and logo. Pass [project] to edit it, and
-/// [canDelete] to offer Delete (the result's `delete` is then true).
+/// [canDelete] to offer Delete (the result's `delete` is then true), and
+/// [inPane] when it's opened from the view pane (centered there).
 /// Returns null when cancelled.
 Future<ProjectDialogResult?> showProjectDialog(
   BuildContext context, {
   Project? project,
   int defaultColorIndex = 0,
   bool canDelete = false,
-}) => showDialog(
+  bool inPane = false,
+}) => showPaneDialog(
   context: context,
-  // The same dimmed backdrop as Settings.
-  barrierColor: Colors.black54,
+  // In the view pane when opened from it (the dashboard), else the
+  // window (the sidebar).
+  inPane: inPane,
   builder: (_) => _ProjectDialog(
     project: project,
     defaultColorIndex: defaultColorIndex,

@@ -4,6 +4,11 @@ import '../tasks/task.dart';
 /// The reminders a task can have, in minutes before it's due (0: when
 /// it's due), in the order the form offers them. Null (no reminder) comes
 /// first there.
+/// Whether [me] (the current profile) may set a task's reminder: only on
+/// tasks assigned to them, since a reminder only ever goes to the assignee.
+bool canSetReminder({required String? assigneeId, required String? me}) =>
+    me != null && assigneeId == me;
+
 const reminderChoices = [0, 5, 15, 30, 60, 24 * 60];
 
 /// How a reminder reads in the form: "At due time", "15 minutes before",

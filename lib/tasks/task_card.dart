@@ -667,8 +667,7 @@ class _Body extends StatelessWidget {
                   in task.subtasks.take(cardSubtaskLimit).indexed)
                 SubtaskLine(
                   subtask: sub,
-                  last: i ==
-                      min(task.subtasks.length, cardSubtaskLimit) - 1,
+                  last: i == min(task.subtasks.length, cardSubtaskLimit) - 1,
                   onToggle: onToggleSubtask == null
                       ? null
                       : () => onToggleSubtask!(sub.id),

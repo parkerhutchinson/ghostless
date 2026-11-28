@@ -194,4 +194,38 @@ void main() {
     expect(Project.fromJson('p', {'name': 'Old'}).description, '');
     expect(back.copyWith(name: 'New').description, withText.description);
   });
+
+  group('companyStats', () {
+    final other = Project(id: 'q', name: 'Other', createdAt: created);
+    final mine = Project(
+      id: 'me',
+      name: 'Personal',
+      ownerId: 'u',
+      createdAt: created,
+    );
+
+    test('counts shared projects\' tasks once each, done on their board', () {
+      final stats = companyStats(
+        [project, other, mine],
+        [
+          task('a', doneIn: {'p'}),
+          task('b', also: ['q']), // on two boards: once
+          task('c', origin: 'q', doneIn: {'p'}), // done elsewhere only
+          task('d', origin: 'me'), // personal: not the company\'s
+        ],
+      );
+      expect(stats, (total: 3, done: 1, projects: 2));
+    });
+
+    test('a personal task multi-homed to a shared board counts there', () {
+      final stats = companyStats(
+        [project, mine],
+        [
+          task('a', origin: 'me', also: ['p'], doneIn: {'p'}),
+          task('b', origin: 'gone'), // its project was deleted
+        ],
+      );
+      expect(stats, (total: 1, done: 1, projects: 1));
+    });
+  });
 }

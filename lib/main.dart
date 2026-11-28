@@ -20,6 +20,8 @@ import 'tasks/task_repository.dart';
 import 'traffic_lights.dart';
 import 'comments/comment_repository.dart';
 import 'comments/comments_scope.dart';
+import 'status/status_update.dart';
+import 'status/status_updates_scope.dart';
 import 'account/account_service.dart';
 import 'account/auth_backend.dart';
 import 'account/sign_in_page.dart';
@@ -166,6 +168,7 @@ Future<void> main() async {
       profiles: profiles,
       activity: activity,
       comments: comments,
+      statusUpdates: StatusUpdateRepository(data.store, projects),
       reminders: reminders,
       files: files,
       accounts: accounts,
@@ -184,6 +187,7 @@ class MainApp extends StatelessWidget {
     required this.profiles,
     required this.activity,
     required this.comments,
+    this.statusUpdates,
     this.reminders,
     this.files,
     required this.accounts,
@@ -193,6 +197,9 @@ class MainApp extends StatelessWidget {
   final AccountService accounts;
   final FileSync? files;
   final CommentRepository comments;
+
+  /// Projects' status updates (made from [data] when not given).
+  final StatusUpdateRepository? statusUpdates;
   final ReminderService? reminders;
 
   final McpService? mcp;
@@ -266,13 +273,19 @@ class MainApp extends StatelessWidget {
                     me: () => profiles.current?.id,
                     child: LabelColors.watching(
                       projects,
-                      child: switch (reminders) {
-                        final service? => RemindersScope(
-                          service: service,
-                          child: child!,
-                        ),
-                        null => child!,
-                      },
+                      child: StatusUpdatesScope(
+                        repo:
+                            statusUpdates ??
+                            StatusUpdateRepository(data.store, projects),
+                        me: () => profiles.current?.id,
+                        child: switch (reminders) {
+                          final service? => RemindersScope(
+                            service: service,
+                            child: child!,
+                          ),
+                          null => child!,
+                        },
+                      ),
                     ),
                   ),
                 ),

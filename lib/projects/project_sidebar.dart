@@ -32,6 +32,10 @@ class ProjectSidebar extends StatelessWidget {
     required this.activitySelected,
     required this.unreadActivity,
     required this.onOpenActivity,
+    this.companySelected = false,
+    this.onOpenCompany,
+    this.developerSelected = false,
+    this.onOpenDeveloper,
     this.personal,
     this.profileImage,
     this.syncStatus,
@@ -76,7 +80,7 @@ class ProjectSidebar extends StatelessWidget {
     label: p.name,
     count: _taskCount(p.id),
     selected:
-        !activitySelected &&
+        !_viewSelected &&
         selectedId == p.id &&
         (inFavorites == selectedInFavorites ||
             // Unstarred while selected from Favorites: back under Projects.
@@ -106,6 +110,21 @@ class ProjectSidebar extends StatelessWidget {
 
   /// The Activity view is showing (no project is selected then).
   final bool activitySelected;
+
+  /// The Company view is showing (no project is selected then).
+  final bool companySelected;
+
+  /// The Company button, under the personal project: its people and
+  /// inviting. Left out (null) for those who don't manage a company.
+  final VoidCallback? onOpenCompany;
+
+  /// The Developer view (debug builds only: null hides its row).
+  final bool developerSelected;
+  final VoidCallback? onOpenDeveloper;
+
+  /// A view (Activity, Company) is showing rather than a project.
+  bool get _viewSelected =>
+      activitySelected || companySelected || developerSelected;
 
   /// How many activities are unread, shown next to Activity.
   final int unreadActivity;
@@ -218,13 +237,34 @@ class ProjectSidebar extends StatelessWidget {
               leading: Icon(Symbols.person, size: 16),
               label: p.name,
               count: _taskCount(p.id),
-              selected: !activitySelected && selectedId == p.id,
+              selected: !_viewSelected && selectedId == p.id,
               onTap: () => onSelect(p.id),
               acceptsTask: (t) => !t.isIn(p.id),
               onDropTask: (t) => onDropTask(t, p.id),
             ),
-            const SizedBox(height: 12),
           ],
+          // The company's people and invites, under the personal project.
+          if (onOpenCompany case final open?)
+            _SidebarItem(
+              leading: Icon(Symbols.category, size: 16),
+              label: 'Company',
+              count: 0,
+              selected: companySelected,
+              onTap: open,
+            ),
+          // Developer-only numbers, under Company (debug builds only).
+          if (onOpenDeveloper case final open?)
+            _SidebarItem(
+              leading: Icon(Symbols.terminal, size: 16),
+              label: 'Developer',
+              count: 0,
+              selected: developerSelected,
+              onTap: open,
+            ),
+          if (personal != null ||
+              onOpenCompany != null ||
+              onOpenDeveloper != null)
+            const SizedBox(height: 12),
           // Starred projects, above all of them.
           if (favorites.isNotEmpty) ...[
             _heading(context, 'FAVORITES'),

@@ -10,17 +10,30 @@ import '../tasks/form_buttons.dart';
 import '../tasks/rich_text/rich_text_editor.dart';
 import 'comment.dart';
 import 'comments_scope.dart';
+import '../widgets/pane_dialog.dart';
 import '../widgets/watched.dart';
 
 /// What a comment can be formatted with: paragraphs, bold and links.
 const commentTools = {RichTextTool.bold, RichTextTool.link};
 
-/// A task's comments in the task form, oldest first: each with its
+/// A task's comments in the task form (or a status update's, in the
+/// status dialog: [taskId] is then the update's id), oldest first: each with its
 /// author's photo, name and job title and when it was posted; then a box
 /// to write one (bold and links only). Comments are posted straight away,
 /// not with the form's Save. Nothing outside a [CommentsScope].
 class TaskComments extends StatefulWidget {
-  const TaskComments({super.key, required this.taskId, this.fontSize = 12});
+  const TaskComments({
+    super.key,
+    required this.taskId,
+    this.fontSize = 12,
+    this.showList = true,
+    this.showBox = true,
+  });
+
+  /// Off for just the box to write one (pinned below the list
+  /// elsewhere, as in the status dialog); [showBox] off for just the list.
+  final bool showList;
+  final bool showBox;
 
   /// Null for a task not created yet: it can't have comments.
   final String? taskId;
@@ -70,9 +83,9 @@ class _TaskCommentsState extends State<TaskComments> {
 
   Future<void> _delete(Comment c) async {
     final repo = CommentsScope.maybeOf(context)?.repo;
-    final ok = await showDialog<bool>(
+    // Centered in the view pane, like everything opened from it.
+    final ok = await showPaneDialog<bool>(
       context: context,
-      barrierColor: Colors.black54,
       builder: (context) => AlertDialog(
         title: const Text('Delete comment?'),
         content: const Text('It will be removed for everyone.'),
@@ -117,66 +130,70 @@ class _TaskCommentsState extends State<TaskComments> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           spacing: 16,
           children: [
-            for (final c in comments)
-              _CommentView(
-                comment: c,
-                fontSize: widget.fontSize,
-                onDelete: c.authorId == me ? () => _delete(c) : null,
-              ),
+            if (widget.showList)
+              for (final c in comments)
+                _CommentView(
+                  comment: c,
+                  fontSize: widget.fontSize,
+                  onDelete: c.authorId == me ? () => _delete(c) : null,
+                ),
             // Writing one: the description's editor (bold and links
             // only), its toolbar, the text and the Comment button all in
             // one box, outlined in the accent while typing.
-            ListenableBuilder(
-              listenable: _focus,
-              // A little more room above it than between comments.
-              builder: (context, child) => Padding(
-                padding: EdgeInsets.only(top: comments.isEmpty ? 0 : 16),
-                child: DecoratedBox(
-                  // Over the contents, so the thicker focused line doesn't
-                  // move them.
-                  position: DecorationPosition.foreground,
-                  decoration: BoxDecoration(
-                    borderRadius: formRadius,
-                    border: Border.all(
-                      color: _focus.hasFocus
-                          ? Theme.of(context).colorScheme.primary
-                          : context.colors.formBorder,
-                      width: _focus.hasFocus ? 2 : 1,
-                    ),
+            if (widget.showBox)
+              ListenableBuilder(
+                listenable: _focus,
+                // A little more room above it than between comments.
+                builder: (context, child) => Padding(
+                  padding: EdgeInsets.only(
+                    top: comments.isEmpty || !widget.showList ? 0 : 16,
                   ),
-                  child: child,
+                  child: DecoratedBox(
+                    // Over the contents, so the thicker focused line doesn't
+                    // move them.
+                    position: DecorationPosition.foreground,
+                    decoration: BoxDecoration(
+                      borderRadius: formRadius,
+                      border: Border.all(
+                        color: _focus.hasFocus
+                            ? Theme.of(context).colorScheme.primary
+                            : context.colors.formBorder,
+                        width: _focus.hasFocus ? 2 : 1,
+                      ),
+                    ),
+                    child: child,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    RichTextEditor(
+                      controller: _draft,
+                      focusNode: _focus,
+                      fontSize: widget.fontSize,
+                      minLines: 2,
+                      hintText: 'Write a comment',
+                      tools: commentTools,
+                      onSubmit: _post,
+                      bordered: false,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 8, 8),
+                      child: Row(
+                        children: [
+                          Text('⌘Return to post', style: muted),
+                          const Spacer(),
+                          FilledButton(
+                            style: formButtonStyle,
+                            onPressed: _canPost && me != null ? _post : null,
+                            child: const Text('Comment'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  RichTextEditor(
-                    controller: _draft,
-                    focusNode: _focus,
-                    fontSize: widget.fontSize,
-                    minLines: 2,
-                    hintText: 'Write a comment',
-                    tools: commentTools,
-                    onSubmit: _post,
-                    bordered: false,
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 8, 8),
-                    child: Row(
-                      children: [
-                        Text('⌘Return to post', style: muted),
-                        const Spacer(),
-                        FilledButton(
-                          style: formButtonStyle,
-                          onPressed: _canPost && me != null ? _post : null,
-                          child: const Text('Comment'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ],
         );
       },

@@ -333,6 +333,23 @@ class _TaskEditorState extends State<TaskEditor> {
   /// Who it's saved as assigned to.
   String? get _assignee => _personalOwner ?? _assigneeId;
 
+  /// The current profile: only they can set a reminder, and only on a
+  /// task assigned to them. Read once (it can't change while the form is
+  /// open).
+  String? _me;
+  bool _meRead = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_meRead) {
+      _meRead = true;
+      _me = RemindersScope.maybeOf(context)?.profiles.current?.id;
+    }
+  }
+
+  bool get _canSetReminder => canSetReminder(assigneeId: _assignee, me: _me);
+
   /// The projects picked in the Multi-home field.
   late final Set<String> _multiHomes = {...?widget.task?.multiHomes};
   late final List<String> _labels = [...?widget.task?.tags];
@@ -777,7 +794,9 @@ class _TaskEditorState extends State<TaskEditor> {
                   children: [
                     _completeButton(),
                     const Spacer(),
-                    _reminderButton(),
+                    // Only on tasks assigned to you: a reminder goes to
+                    // the assignee, so only they set one.
+                    if (_canSetReminder) _reminderButton(),
                     _menu(),
                   ],
                 ),
@@ -1483,7 +1502,7 @@ class _TaskEditorState extends State<TaskEditor> {
   /// The reminder bell beside the ⋯ menu: when to remind the assignee (a macOS
   /// notification). On an accent square while one is set. Opens a
   /// menu of the choices (the one set ticked), which says why when there
-  /// can't be one yet (no due date) or nobody would get it (no assignee).
+  /// can't be one yet (no due date). Only shown on tasks assigned to you.
   Widget _reminderButton() {
     final hasDue = _dueDate != null;
     final current = hasDue ? _reminder : null;
@@ -1515,9 +1534,7 @@ class _TaskEditorState extends State<TaskEditor> {
         }
       },
       itemBuilder: (_) => [
-        note(
-          hasDue ? 'Remind the assignee' : 'Set a due date to add a reminder',
-        ),
+        note(hasDue ? 'Remind me' : 'Set a due date to add a reminder'),
         if (hasDue) ...[
           for (final m in [null, ...reminderChoices, ?_unusualReminder])
             PopupMenuItem<int>(
@@ -1539,10 +1556,6 @@ class _TaskEditorState extends State<TaskEditor> {
                 ],
               ),
             ),
-          if (_assignee == null) ...[
-            const PopupMenuDivider(),
-            note('Nobody is assigned: no one will be reminded'),
-          ],
         ],
       ],
       // A square the height of Mark complete, like the ⋯ button (the
@@ -1582,7 +1595,11 @@ class _TaskEditorState extends State<TaskEditor> {
       assigneeId: scope.find(_assignee)?.id,
       fontSize: _chipFontSize,
       enabled: !locked,
-      onChanged: (id) => setState(() => _assigneeId = id),
+      onChanged: (id) => setState(() {
+        // A reminder is the assignee's own: someone new starts without.
+        if (id != _assignee) _reminder = null;
+        _assigneeId = id;
+      }),
     );
     if (!locked) return picker;
     return Tooltip(
@@ -1722,8 +1739,10 @@ class _TaskEditorState extends State<TaskEditor> {
             // Its space is kept while hidden, so the title doesn't shift.
             ValueListenableBuilder(
               valueListenable: _hoveredSubtask,
-              builder: (context, hovered, child) =>
-                  Visibility.maintain(visible: hovered == sub.id, child: child!),
+              builder: (context, hovered, child) => Visibility.maintain(
+                visible: hovered == sub.id,
+                child: child!,
+              ),
               child: IconButton(
                 tooltip: 'Remove subtask',
                 iconSize: 14,

@@ -7,6 +7,8 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../profiles/profile_avatar.dart';
 import '../profiles/profiles_scope.dart';
 import '../projects/project.dart';
+import '../status/status_dialog.dart';
+import '../widgets/pane_dialog.dart';
 import '../projects/project_dashboard.dart';
 import '../projects/project_logo.dart';
 import '../projects/project_repository.dart';
@@ -373,7 +375,7 @@ class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
     TaskColumn target,
     int count,
   ) async =>
-      await showDialog<bool>(
+      await showPaneDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: Text('Delete "${column.title}"?'),
@@ -521,6 +523,12 @@ class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
               onSearch: widget.onSearch,
               favorite: widget.favorite,
               onToggleFavorite: widget.onToggleFavorite,
+              // A shared project's status, after the star (none on a
+              // personal project).
+              status: _project?.status,
+              onStatus: _project == null || _project!.isPersonal
+                  ? null
+                  : () => showStatusDialog(context, project: _project!),
             ),
             Expanded(
               child: StreamBuilder<List<Task>>(
@@ -572,6 +580,8 @@ class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
                           entrance: _boardFade,
                           projects: widget.projects,
                           onOpenTask: widget.onOpenTask,
+                          onOpenStatus: () =>
+                              showStatusDialog(context, project: _project!),
                         ),
                       TaskView.board || TaskView.dashboard => TaskBoard(
                         key: ValueKey(widget.projectId),
@@ -638,6 +648,58 @@ class _TasksPageState extends State<TasksPage> with TickerProviderStateMixin {
   }
 }
 
+/// A project's status in its header: only the one that's set, its colored
+/// dot and name in a 4px box (a muted "Set status" when there's none).
+/// Opens the status dialog, to read the updates and post a new one.
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.status, required this.onOpen});
+  final ProjectStatus? status;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: 'Status updates',
+      waitDuration: const Duration(milliseconds: 600),
+      child: Material(
+        color: colors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: formRadius,
+          side: BorderSide(color: colors.cardBorder),
+        ),
+        child: InkWell(
+          customBorder: formShape,
+          onTap: onOpen,
+          child: SizedBox(
+            height: 28,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                spacing: 7,
+                children: [
+                  if (status case final s?)
+                    Icon(Icons.circle, size: 10, color: s.color),
+                  Text(
+                    status?.label ?? 'Set status',
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: status == null ? colors.mutedText : colors.text,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _Header extends StatelessWidget {
   const _Header({
     required this.title,
@@ -649,7 +711,14 @@ class _Header extends StatelessWidget {
     this.onSearch,
     this.favorite = false,
     this.onToggleFavorite,
+    this.status,
+    this.onStatus,
   });
+
+  /// The project's status, shown after the star; [onStatus] opens its
+  /// updates (null: not shown, as on a personal project).
+  final ProjectStatus? status;
+  final VoidCallback? onStatus;
 
   /// The star after the title: in favorites or not.
   final bool favorite;
@@ -751,6 +820,10 @@ class _Header extends StatelessWidget {
                           : titleColor.withValues(alpha: 0.6),
                     ),
                   ),
+                if (onStatus case final open?) ...[
+                  const SizedBox(width: 4),
+                  _StatusChip(status: status, onOpen: open),
+                ],
               ],
             ),
           ),

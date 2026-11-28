@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:sync_engine/sync_engine.dart';
@@ -13,11 +14,13 @@ import '../mcp/mcp_service.dart';
 import '../reminders/reminder_service.dart';
 import '../files/file_sync.dart';
 import '../account/account_service.dart';
+import '../account/company_page.dart';
 import '../search/search_dialog.dart';
 import '../sync/sync_service.dart';
 import '../tasks/task.dart';
 import '../tasks/task_repository.dart';
 import '../layout.dart';
+import '../developer/developer_page.dart';
 import '../settings/settings_dialog.dart';
 import '../settings/settings_repository.dart';
 import '../tasks/form_buttons.dart';
@@ -85,6 +88,13 @@ class Workspace extends StatefulWidget {
   /// Remembered in place of a project id while the Activity view shows.
   static const activityViewId = ':activity';
 
+  /// Remembered in place of a project id while the Company view shows.
+  static const companyViewId = ':company';
+
+  /// Remembered in place of a project id while the Developer view shows
+  /// (debug builds only).
+  static const developerViewId = ':developer';
+
   /// Project created at startup for tasks that have none.
   static const orphanProjectName = 'General';
 
@@ -119,6 +129,12 @@ class _WorkspaceState extends State<Workspace> {
     super.initState();
     HardwareKeyboard.instance.addHandler(_onKey);
     _menu.setMethodCallHandler(_onMenu);
+    widget.accounts?.account.addListener(_accountChanged);
+    final a = widget.accounts?.account.value;
+    _companyShown = (
+      manages: a?.managesCompany ?? false,
+      org: a?.businessOrgName,
+    );
     _adoptOrphans();
     // Image files of tasks deleted just before the app last quit.
     widget.tasks.deleteUnusedImages();
@@ -155,8 +171,22 @@ class _WorkspaceState extends State<Workspace> {
     }
   }
 
+  /// Activity or Company, not a project.
+  static bool _isView(String? id) => id?.startsWith(':') ?? false;
+
+  /// Whether the Company button shows; rebuilt only when that (or the
+  /// company's name) changes, not on every session refresh.
+  ({bool manages, String? org})? _companyShown;
+
+  void _accountChanged() {
+    final a = widget.accounts?.account.value;
+    final now = (manages: a?.managesCompany ?? false, org: a?.businessOrgName);
+    if (now != _companyShown) setState(() => _companyShown = now);
+  }
+
   @override
   void dispose() {
+    widget.accounts?.account.removeListener(_accountChanged);
     _reminderClicks?.cancel();
     HardwareKeyboard.instance.removeHandler(_onKey);
     _menu.setMethodCallHandler(null);
@@ -213,7 +243,7 @@ class _WorkspaceState extends State<Workspace> {
     final profile = widget.profiles.current?.id;
     if (visibleProjects(widget.projects.current(), profile).isEmpty) return;
     _newTaskRequest = ++_newTaskSerial;
-    _select(_selectedId == Workspace.activityViewId ? null : _selectedId);
+    _select(_isView(_selectedId) ? null : _selectedId);
   }
 
   /// A new task in this profile's personal project, switching to it.
@@ -309,12 +339,13 @@ class _WorkspaceState extends State<Workspace> {
 
   /// The project's dialog: saves its name and color, or deletes it. Not
   /// for a personal project, which has nothing to edit.
-  Future<void> _edit(Project project) async {
+  Future<void> _edit(Project project, {bool inPane = false}) async {
     if (project.isPersonal) return;
     final result = await showProjectDialog(
       context,
       project: project,
       canDelete: true,
+      inPane: inPane,
     );
     if (result == null) return;
     if (result.delete) return _delete(project);
@@ -422,6 +453,14 @@ class _WorkspaceState extends State<Workspace> {
     // nothing was selected yet.
     final showActivity =
         _selectedId == Workspace.activityViewId && profile != null;
+    final accounts = widget.accounts;
+    final managesCompany = _companyShown?.manages ?? false;
+    final showCompany =
+        _selectedId == Workspace.companyViewId &&
+        managesCompany &&
+        accounts != null;
+    final showDeveloper =
+        kDebugMode && _selectedId == Workspace.developerViewId;
     final selected =
         projects.where((p) => p.id == _selectedId).firstOrNull ??
         shared.firstOrNull ??
@@ -447,6 +486,14 @@ class _WorkspaceState extends State<Workspace> {
                 activitySelected: showActivity,
                 unreadActivity: activity.where((a) => a.isUnread).length,
                 onOpenActivity: () => _select(Workspace.activityViewId),
+                companySelected: showCompany,
+                onOpenCompany: managesCompany && accounts != null
+                    ? () => _select(Workspace.companyViewId)
+                    : null,
+                developerSelected: showDeveloper,
+                onOpenDeveloper: kDebugMode
+                    ? () => _select(Workspace.developerViewId)
+                    : null,
                 projects: shared,
                 personal: personal,
                 profile:
@@ -487,7 +534,16 @@ class _WorkspaceState extends State<Workspace> {
         Expanded(
           // From the top of the window: each page's header (FrostedBar)
           // clears the title bar strip itself.
-          child: showActivity
+          child: showDeveloper
+              ? DeveloperPage(sync: widget.sync)
+              : showCompany
+              ? CompanyPage(
+                  accounts: accounts,
+                  tasks: widget.tasks,
+                  projects: projects,
+                  settings: widget.settings,
+                )
+              : showActivity
               ? ActivityPage(
                   activity: widget.activity,
                   tasks: widget.tasks,
@@ -517,7 +573,8 @@ class _WorkspaceState extends State<Workspace> {
                   onViewChanged: (view) => _views.set(selected.id, view),
                   onEditProject: selected.isPersonal
                       ? null
-                      : () => _edit(selected),
+                      // From the dashboard: centered in the pane.
+                      : () => _edit(selected, inPane: true),
                   // The star in the header; not on a personal project.
                   favorite: profile?.isFavorite(selected.id) ?? false,
                   onToggleFavorite: selected.isPersonal

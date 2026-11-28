@@ -5,7 +5,7 @@ import 'dart:ui' show Color;
 const titleBarHeight = 28.0;
 
 /// Width of the project sidebar on the left; the tasks pane is the rest.
-const sidebarWidth = 220.0;
+const sidebarWidth = 260.0;
 
 /// About 82% black: the default background color, and the base for the
 /// app's surfaces and borders. Widgets use

@@ -91,7 +91,32 @@ class _ProfileDialogState extends State<_ProfileDialog> {
     return AlertDialog(
       backgroundColor: context.colors.surface,
       shape: formShape,
-      title: const Text('Profile'),
+      // Their role at the right, level with the title.
+      title: Row(
+        children: [
+          // Bold, like a project's header.
+          const Expanded(
+            child: Text(
+              'Profile',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          if (widget.accounts?.account case final account?)
+            ValueListenableBuilder(
+              valueListenable: account,
+              builder: (context, value, _) => switch (value?.role) {
+                final role? => Text(
+                  roleLabel(role),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: context.colors.mutedText,
+                  ),
+                ),
+                null => const SizedBox.shrink(),
+              },
+            ),
+        ],
+      ),
       content: SizedBox(
         width: 400,
         child: Watched<List<Profile>>(

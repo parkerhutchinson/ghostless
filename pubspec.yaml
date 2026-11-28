@@ -13,6 +13,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_local_notifications: ^23.0.4
+  flutter_scene: ^0.24.6
   flutter_svg: ^2.5.0
   http: ^1.6.0
   image: ^4.13.1
@@ -26,6 +27,7 @@ dependencies:
     path: packages/sync_engine
   timezone: ^0.11.2
   url_launcher: ^6.3.3
+  vector_math: ^2.4.4
   window_manager: ^0.7.0
 
 dev_dependencies:
@@ -35,3 +37,37 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # The 3D model turning on the sign-in screen (SignInModel).
+  assets:
+    - assets/scene/
+
+  # Fragment shaders (compiled at build time).
+  shaders:
+    # Colors the sign-in screen's 3D scene from the background color.
+    - shaders/light_map.frag
+
+  # Inter 4.1 (https://github.com/rsms/inter, SIL OFL 1.1: assets/fonts/OFL.txt),
+  # bundled so the sandboxed app works offline. Set app-wide in buildAppTheme().
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Light.ttf
+          weight: 300
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-SemiBoldItalic.ttf
+          weight: 600
+          style: italic
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Inter-BoldItalic.ttf
+          weight: 700
+          style: italic

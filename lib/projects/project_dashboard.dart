@@ -1,3 +1,7 @@
+import '../status/status_dialog.dart';
+import '../status/status_update.dart';
+import '../status/status_updates_scope.dart';
+import '../widgets/watched.dart';
 import 'dart:math' as math;
 
 import 'package:material_symbols_icons/symbols.dart';
@@ -13,7 +17,7 @@ import '../tasks/rich_text/rich_text_editor.dart';
 import '../tasks/task.dart';
 import '../tasks/task_board.dart' show headerButtonFill;
 import '../widgets/bottom_fade.dart';
-import '../widgets/frosted_bar.dart';
+import '../widgets/list_heading.dart';
 import 'project.dart';
 import 'project_logo.dart';
 import 'project_stats.dart';
@@ -38,7 +42,7 @@ const _maxWidth = 1250.0 - _pagePadding * 2;
 
 /// How the big numbers count up (and the total's bar fills): over the
 /// first part of the dashboard's opening animation.
-const _countUp = Interval(0, 0.6, curve: Curves.easeOutCubic);
+const dashboardCountUp = Interval(0, 0.6, curve: Curves.easeOutCubic);
 
 /// Below this width, the top tiles stack instead of sitting side by side.
 const _stackBelow = 620.0;
@@ -55,7 +59,11 @@ class ProjectDashboard extends StatefulWidget {
     this.entrance,
     this.projects = const [],
     this.onOpenTask,
+    this.onOpenStatus,
   });
+
+  /// Opens the project's status updates, to post a new one.
+  final VoidCallback? onOpenStatus;
 
   /// Opens a task on a board (a reminder's, clicked on a personal
   /// dashboard).
@@ -85,7 +93,7 @@ class ProjectDashboard extends StatefulWidget {
 class _ProjectDashboardState extends State<ProjectDashboard>
     with SingleTickerProviderStateMixin {
   /// The opening animation, 0 to 1, after the page has faded in: the
-  /// total counts up ([_TotalTile]) and the rings fill in ([_ColumnTile]:
+  /// total counts up ([TotalTile]) and the rings fill in ([_ColumnTile]:
   /// each one starts a little after the one before).
   late final _rings = AnimationController(
     vsync: this,
@@ -156,7 +164,7 @@ class _ProjectDashboardState extends State<ProjectDashboard>
                 // Half the width each, so the text keeps to a readable
                 // line length: the description, then the project's mark.
                 LayoutBuilder(
-                  builder: (context, constraints) => _Cells(
+                  builder: (context, constraints) => DashboardCells(
                     perRow: constraints.maxWidth < _stackBelow ? 1 : 2,
                     children: [
                       _DescriptionView(
@@ -169,10 +177,21 @@ class _ProjectDashboardState extends State<ProjectDashboard>
                   ),
                 ),
                 const SizedBox(height: _sectionGap),
+                // The latest status update, under what it's about.
+                _LatestStatus(
+                  key: ValueKey(project.id),
+                  projectId: project.id,
+                  onOpen: widget.onOpenStatus,
+                ),
+                const SizedBox(height: _sectionGap),
               ],
               const _SectionHeader('Overview'),
               _TopRow(
-                total: _TotalTile(stats: stats, intro: _rings),
+                total: TotalTile(
+                  total: stats.total,
+                  done: stats.done,
+                  intro: _rings,
+                ),
                 // A personal project: its owner, instead of who's assigned.
                 people: personal
                     ? _ProfileTile(profileId: project.ownerId)
@@ -193,7 +212,7 @@ class _ProjectDashboardState extends State<ProjectDashboard>
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         _SectionHeader('Reminders', count: reminders.length),
-                        _Cells(
+                        DashboardCells(
                           perRow: 1,
                           children: [
                             if (reminders.isEmpty)
@@ -268,87 +287,36 @@ class _SectionHeader extends StatelessWidget {
   final ({IconData icon, String tooltip, VoidCallback onPressed})? action;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.zero,
+  Widget build(BuildContext context) => ListHeading(
     // No line: the tiles' top border is right under it.
-    child: FrostedHeader(
-      line: false,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        child: Row(
-          children: [
-            // Title and count take all the room left of the button, as
-            // on a column, so the button is at the right edge.
-            Expanded(
-              child: Row(
-                spacing: 8,
-                children: [
-                  Flexible(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  if (count case final count?)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: context.colors.card,
-                        borderRadius: formRadius,
-                      ),
-                      child: Text(
-                        '$count',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: context.colors.text,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+    title,
+    count: count,
+    actions: [
+      if (action case final a?)
+        IconButton(
+          tooltip: a.tooltip,
+          iconSize: 17,
+          padding: EdgeInsets.zero,
+          style: headerButtonFill(context).merge(
+            IconButton.styleFrom(
+              fixedSize: const Size(26, 26),
+              minimumSize: const Size(26, 26),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            // The column heading's button size, so every heading is as
-            // tall as a column's, with or without one.
-            SizedBox(
-              height: 26,
-              child: switch (action) {
-                final a? => IconButton(
-                  tooltip: a.tooltip,
-                  iconSize: 17,
-                  padding: EdgeInsets.zero,
-                  style: headerButtonFill(context).merge(
-                    IconButton.styleFrom(
-                      fixedSize: const Size(26, 26),
-                      minimumSize: const Size(26, 26),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                  ),
-                  onPressed: a.onPressed,
-                  icon: Icon(a.icon),
-                ),
-                null => null,
-              },
-            ),
-          ],
+          ),
+          onPressed: a.onPressed,
+          icon: Icon(a.icon),
         ),
-      ),
-    ),
+    ],
   );
 }
 
 /// A box on the card shade, square like the list view's: a cell of a
-/// [_Cells]. It draws only its right and bottom edges, and the group draws
+/// [DashboardCells]. It draws only its right and bottom edges, and the group draws
 /// the top and left, so neighbours share one line.
-class _Tile extends StatelessWidget {
-  const _Tile({
+class DashboardTile extends StatelessWidget {
+  const DashboardTile({
+    super.key,
     required this.child,
     this.padding = const EdgeInsets.all(16),
     this.fill,
@@ -377,8 +345,12 @@ class _Tile extends StatelessWidget {
 /// rest and as tall as the tallest in its row; a short last row leaves the
 /// rest of it empty. Draws the left border (and the first row's top
 /// border) the cells don't.
-class _Cells extends StatelessWidget {
-  const _Cells({required this.perRow, required this.children});
+class DashboardCells extends StatelessWidget {
+  const DashboardCells({
+    super.key,
+    required this.perRow,
+    required this.children,
+  });
   final int perRow;
   final List<Widget> children;
 
@@ -431,9 +403,9 @@ class _TopRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final people = this.people;
-    if (people == null) return _Cells(perRow: 1, children: [total]);
+    if (people == null) return DashboardCells(perRow: 1, children: [total]);
     return LayoutBuilder(
-      builder: (context, constraints) => _Cells(
+      builder: (context, constraints) => DashboardCells(
         perRow: constraints.maxWidth < _stackBelow ? 1 : 2,
         children: [total, people],
       ),
@@ -442,9 +414,16 @@ class _TopRow extends StatelessWidget {
 }
 
 /// The big number: every task on the board, with how many are done.
-class _TotalTile extends StatelessWidget {
-  const _TotalTile({required this.stats, required this.intro});
-  final ProjectStats stats;
+class TotalTile extends StatelessWidget {
+  const TotalTile({
+    super.key,
+    required this.total,
+    required this.done,
+    required this.intro,
+    this.label = 'Total tasks',
+  });
+  final int total, done;
+  final String label;
 
   /// The dashboard's opening animation (0 to 1): the number counts up
   /// and the bar fills over the first part of it, alongside the first
@@ -455,7 +434,7 @@ class _TotalTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final accent = Theme.of(context).colorScheme.primary;
-    final fraction = stats.total == 0 ? 0.0 : stats.done / stats.total;
+    final fraction = total == 0 ? 0.0 : done / total;
     // A change later on (a task done) slides the bar to its new length.
     return TweenAnimationBuilder<double>(
       tween: Tween(end: fraction),
@@ -464,10 +443,10 @@ class _TotalTile extends StatelessWidget {
       builder: (context, shownFraction, _) => AnimatedBuilder(
         animation: intro,
         builder: (context, _) {
-          final p = _countUp.transform(intro.value);
+          final p = dashboardCountUp.transform(intro.value);
           int counted(int n) => (n * p).round();
           final bar = shownFraction * p;
-          return _Tile(
+          return DashboardTile(
             padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -475,7 +454,7 @@ class _TotalTile extends StatelessWidget {
               // the bottom.
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _BigNumber(label: 'Total tasks', value: counted(stats.total)),
+                BigNumber(label: label, value: counted(total)),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -499,8 +478,8 @@ class _TotalTile extends StatelessWidget {
                     Text(
                       // The final numbers from the start: only the big
                       // number and the bar animate.
-                      '${stats.done} done · ${stats.open} open'
-                      '${stats.total == 0 ? '' : ' · ${(fraction * 100).round()}% complete'}',
+                      '$done done · ${total - done} open'
+                      '${total == 0 ? '' : ' · ${(fraction * 100).round()}% complete'}',
                       style: TextStyle(
                         fontSize: 12,
                         color: colors.mutedText,
@@ -519,10 +498,18 @@ class _TotalTile extends StatelessWidget {
 }
 
 /// A tile's headline: a small label over a big number.
-class _BigNumber extends StatelessWidget {
-  const _BigNumber({required this.label, required this.value});
+class BigNumber extends StatelessWidget {
+  const BigNumber({
+    super.key,
+    required this.label,
+    required this.value,
+    this.format,
+  });
   final String label;
   final int value;
+
+  /// How [value] is written (a size, say); as a plain number without.
+  final String Function(int value)? format;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -533,7 +520,7 @@ class _BigNumber extends StatelessWidget {
         style: TextStyle(fontSize: 12, color: context.colors.mutedText),
       ),
       Text(
-        '$value',
+        format?.call(value) ?? '$value',
         style: TextStyle(
           fontSize: 64,
           height: 1.15,
@@ -573,7 +560,7 @@ class _PeopleTile extends StatelessWidget {
     final top = topCompleter([for (final (_, a) in people) a]);
     final topProfile = scope?.find(top?.assigneeId);
     final muted = TextStyle(fontSize: 12, color: colors.mutedText);
-    return _Tile(
+    return DashboardTile(
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -585,17 +572,18 @@ class _PeopleTile extends StatelessWidget {
             children: [
               AnimatedBuilder(
                 animation: intro,
-                builder: (context, _) => _BigNumber(
+                builder: (context, _) => BigNumber(
                   label: 'People assigned',
-                  value: (people.length * _countUp.transform(intro.value))
-                      .round(),
+                  value:
+                      (people.length * dashboardCountUp.transform(intro.value))
+                          .round(),
                 ),
               ),
               const SizedBox(height: 12),
               if (people.isEmpty)
                 Text('No one is assigned to a task here yet.', style: muted)
               else
-                _AvatarStack(
+                AvatarStack(
                   people: [for (final (profile, _) in people) profile],
                   intro: intro,
                 ),
@@ -669,8 +657,8 @@ class _ProfileTile extends StatelessWidget {
     final colors = context.colors;
     final scope = ProfilesScope.maybeOf(context);
     final profile = scope?.find(profileId);
-    if (profile == null) return const _Tile(child: SizedBox.shrink());
-    return _Tile(
+    if (profile == null) return const DashboardTile(child: SizedBox.shrink());
+    return DashboardTile(
       padding: const EdgeInsets.all(20),
       // The avatar centered in the tile's height (which is the total's,
       // beside it); the name at the top, level with "Total tasks".
@@ -755,8 +743,8 @@ class _ProfileField extends StatelessWidget {
 
 /// The people's avatars in a row, each overlapping the one before, up to
 /// [max]; past that, a "+N" for the rest. Names show on hover.
-class _AvatarStack extends StatelessWidget {
-  const _AvatarStack({required this.people, required this.intro});
+class AvatarStack extends StatelessWidget {
+  const AvatarStack({super.key, required this.people, required this.intro});
   final List<Profile> people;
 
   /// The dashboard's opening animation: each avatar (then the "+N")
@@ -862,7 +850,7 @@ class _ColumnGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) => _Cells(
+    builder: (context, constraints) => DashboardCells(
       perRow: (constraints.maxWidth / _minColumnTile).floor().clamp(
         1,
         _maxPerRow,
@@ -932,7 +920,7 @@ class _RingTile extends StatelessWidget {
     final colors = context.colors;
     final accent = Theme.of(context).colorScheme.primary;
     final empty = total == 0;
-    return _Tile(
+    return DashboardTile(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1033,10 +1021,10 @@ class _AssignedGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final muted = TextStyle(fontSize: 12, color: context.colors.mutedText);
     if (stats.isEmpty) {
-      return _Cells(
+      return DashboardCells(
         perRow: 1,
         children: [
-          _Tile(
+          DashboardTile(
             child: Text(
               'You aren\'t assigned to any tasks in other projects.',
               style: muted,
@@ -1046,7 +1034,7 @@ class _AssignedGrid extends StatelessWidget {
       );
     }
     return LayoutBuilder(
-      builder: (context, constraints) => _Cells(
+      builder: (context, constraints) => DashboardCells(
         perRow: (constraints.maxWidth / _minColumnTile).floor().clamp(
           1,
           _maxPerRow,
@@ -1144,6 +1132,87 @@ class _RingPainter extends CustomPainter {
       old.fraction != fraction || old.done != done || old.open != open;
 }
 
+/// A shared project's latest status update, at the top of its dashboard:
+/// under a Status heading (with how many there are, and a button to post
+/// one), the update in a tile; a note and a button when there's none.
+class _LatestStatus extends StatelessWidget {
+  const _LatestStatus({super.key, required this.projectId, this.onOpen});
+  final String projectId;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = StatusUpdatesScope.maybeOf(context);
+    if (scope == null) return const SizedBox.shrink();
+    return Watched<List<StatusUpdate>>(
+      watch: () => scope.repo.watch(projectId),
+      current: () => scope.repo.forProject(projectId),
+      builder: (context, updates) {
+        final latest = updates.firstOrNull;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _SectionHeader(
+              'Status',
+              count: updates.isEmpty ? null : updates.length,
+              action: onOpen == null
+                  ? null
+                  : (
+                      icon: Symbols.edit_note,
+                      tooltip: 'Status updates',
+                      onPressed: onOpen!,
+                    ),
+            ),
+            DashboardCells(
+              perRow: 1,
+              children: [
+                if (latest != null)
+                  MouseRegion(
+                    cursor: onOpen == null
+                        ? MouseCursor.defer
+                        : SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: onOpen,
+                      child: DashboardTile(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 18,
+                        ),
+                        child: StatusUpdateView(update: latest),
+                      ),
+                    ),
+                  )
+                else
+                  DashboardTile(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'No status updates yet.',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: context.colors.mutedText,
+                            ),
+                          ),
+                        ),
+                        if (onOpen case final open?)
+                          TextButton(
+                            onPressed: open,
+                            child: const Text('Post an update'),
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 /// The project's logo, or without one its color as a square, centered in
 /// a tile beside the description.
 class _MarkTile extends StatelessWidget {
@@ -1153,7 +1222,7 @@ class _MarkTile extends StatelessWidget {
   static const _size = 120.0;
 
   @override
-  Widget build(BuildContext context) => _Tile(
+  Widget build(BuildContext context) => DashboardTile(
     padding: const EdgeInsets.all(24),
     child: Center(
       child: switch (project.logo) {
@@ -1183,7 +1252,7 @@ class _DescriptionViewState extends State<_DescriptionView> {
     if (widget.markdown.trim().isEmpty) {
       // The note where the text would start (the same padding), and the
       // button in the bottom-right corner.
-      return _Tile(
+      return DashboardTile(
         // The note where the text starts when there is one (20 down).
         padding: const EdgeInsets.fromLTRB(16, 20, 12, 12),
         child: Column(
@@ -1206,7 +1275,7 @@ class _DescriptionViewState extends State<_DescriptionView> {
         ),
       );
     }
-    return _Tile(
+    return DashboardTile(
       // Roomy above and below (more than the sides).
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
       // Read only; its links open.
@@ -1236,7 +1305,7 @@ class _ReminderRow extends StatelessWidget {
         onTap: onOpen,
         hoverColor: colors.rowHover,
         splashFactory: NoSplash.splashFactory,
-        child: _Tile(
+        child: DashboardTile(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           // Transparent over the ink, so the hover shows.
           fill: Colors.transparent,
@@ -1307,7 +1376,7 @@ class _NoReminders extends StatelessWidget {
   const _NoReminders();
 
   @override
-  Widget build(BuildContext context) => _Tile(
+  Widget build(BuildContext context) => DashboardTile(
     child: Text(
       'No reminders coming up. Set one on a task assigned to you, in the '
       'task form under Reminder.',

@@ -52,6 +52,28 @@ Rules:
   `projectStats` (`project_stats.dart`, unit tested), never worked out
   in widgets.
 
+### List and column headings: one style
+
+Every heading over a list or column looks exactly the same: the board's
+columns, the list view's sections, Activity's days, the dashboard's
+sections, the Company page's lists, and any new one, without being
+asked. Use `ListHeading` (`lib/widgets/list_heading.dart`), or for a
+heading that needs more (the board's editable column name),
+`listHeadingTitleStyle`, `listHeadingPadding`, `HeadingCount` and 26px
+buttons, as `ColumnHeader` does.
+
+- On frosted glass (`FrostedHeader`), title 14/w600, its count in a
+  chip beside it, buttons (26 square) at the right; the row is 26 tall
+  with 10 above and below, so every heading is the same height with or
+  without buttons.
+- No margin under it: the content sits right on the heading. Space goes
+  above a heading (between groups), never between it and its content.
+- One line between heading and content, never two: when the content
+  starts with its own border (a boxed list, rows with a top line), the
+  heading has no line (`line: false`).
+- The count chip is square on the square pages (Activity, Company, the
+  list view; `squareCount`), 4px elsewhere.
+
 ### Form fields: one height
 
 Every boxed one-line field is the same height, **36px**
@@ -103,6 +125,30 @@ Use Material Symbols (`Symbols.*` from `material_symbols_icons`), never
 `Icons.*`: the theme sets a lighter stroke weight (300) that only the
 Symbols font supports. The one exception is `Icons.circle`, solid dots
 such as the unread marker (Symbols' circle is an outline).
+
+### Every view fades in
+
+Every view's content fades in when it opens, without being asked: a
+project's board, list and dashboard (`TasksPage`), Activity, Company, and
+any new view. Wrap the content under the view's header (`FrostedBar`) in
+`FadeInView` (`lib/widgets/fade_in_view.dart`): 250ms, eased out,
+starting after the frame that builds it, never faster than a 60fps step
+per frame (so a slow first frame doesn't eat the fade). The header
+itself doesn't fade. Key it (or the view) to fade in again when what it
+shows changes.
+
+### Modals from a view center in its pane
+
+Every modal opened from inside a view pane (a project's board, list or
+dashboard, Activity, Company, and any new view) is centered in that
+pane, right of the sidebar, never in the whole window, without being
+asked. Open it with `showPaneDialog` (`lib/widgets/pane_dialog.dart`),
+never a bare `showDialog`; the backdrop still dims the whole window.
+Examples: the status updates dialog, Delete column, search, and the
+project dialog when the dashboard opens it. A dialog the sidebar opens
+(Settings, New project, the sidebar's Edit project) stays centered in
+the window (`inPane: false`). The task editor is a panel at the right,
+not a centered modal.
 
 ### Every page's bottom fades out
 

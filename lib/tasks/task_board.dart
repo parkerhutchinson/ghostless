@@ -17,6 +17,7 @@ import 'tasks_page.dart' show TaskCardBuilder;
 import '../widgets/bottom_fade.dart';
 import '../widgets/left_menu_button.dart';
 import '../widgets/selected_text.dart';
+import '../widgets/list_heading.dart';
 
 const _columnWidth = 350.0;
 const _columnGap = 16.0;
@@ -458,10 +459,7 @@ class ColumnHeader extends StatefulWidget {
 }
 
 class _ColumnHeaderState extends State<ColumnHeader> {
-  static const _titleStyle = TextStyle(
-    fontSize: 14,
-    fontWeight: FontWeight.w600,
-  );
+  static const _titleStyle = listHeadingTitleStyle;
 
   bool _editing = false;
   late final _name = AppTextController();
@@ -507,8 +505,10 @@ class _ColumnHeaderState extends State<ColumnHeader> {
 
   @override
   Widget build(BuildContext context) {
+    // The one list heading style (see ListHeading), with an editable
+    // name: same padding, title, count and 26px buttons.
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: listHeadingPadding,
       child: Row(
         children: [
           // Name and count take all the room left of the +, so the + is
@@ -557,20 +557,7 @@ class _ColumnHeaderState extends State<ColumnHeader> {
                           ),
                         ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 1,
-                  ),
-                  decoration: BoxDecoration(
-                    color: context.colors.card,
-                    borderRadius: formRadius,
-                  ),
-                  child: Text(
-                    '${widget.count}',
-                    style: TextStyle(fontSize: 12, color: context.colors.text),
-                  ),
-                ),
+                HeadingCount(widget.count),
               ],
             ),
           ),

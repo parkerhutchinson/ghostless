@@ -172,3 +172,29 @@ AssignedStats? _assignedIn(Project p, List<Task> mine, DateTime now) {
   }
   return AssignedStats(p, total: total, done: done, overdue: overdue);
 }
+
+/// The company's tasks, for the Company page: every task on its shared
+/// projects (a personal project's are its owner's alone), each counted
+/// once however many boards it's on.
+typedef CompanyStats = ({int total, int done, int projects});
+
+/// Works out [CompanyStats] from every project and task. A task counts
+/// when it's on a shared project in [projects] (deleted ones aren't there); it's done when it's
+/// completed on its origin board, or (when that's personal or gone) on
+/// the first shared board it's on.
+CompanyStats companyStats(Iterable<Project> projects, Iterable<Task> tasks) {
+  final shared = {
+    for (final p in projects)
+      if (!p.isPersonal) p.id,
+  };
+  var total = 0, done = 0;
+  for (final t in tasks) {
+    final board = shared.contains(t.originId)
+        ? t.originId
+        : t.projectIds.where(shared.contains).firstOrNull;
+    if (board == null) continue;
+    total++;
+    if (t.isCompletedIn(board)) done++;
+  }
+  return (total: total, done: done, projects: shared.length);
+}

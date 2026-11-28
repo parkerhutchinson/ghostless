@@ -3,6 +3,10 @@ import '../tasks/rich_text/rich_text_model.dart';
 /// A comment on a task (collection `comments`, synced): who wrote it, when,
 /// and what it says. Kept apart from the task, so people commenting at
 /// once on different Macs don't overwrite each other.
+///
+/// Status updates have comments too: their [taskId] is then the update's
+/// id (see [StatusUpdate]). No task has that id, so they tell nobody in
+/// Activity.
 final class Comment {
   const Comment({
     required this.id,

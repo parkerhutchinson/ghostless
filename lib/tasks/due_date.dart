@@ -116,7 +116,11 @@ const _monthNames = [
 
 /// A day as shown in the date box: `Nov 20, 2026`.
 String formatDate(DateTime day) =>
-    '${_monthNames[day.month - 1].substring(0, 3)} ${day.day}, ${day.year}';
+    '${formatMonthDay(day)}, ${day.year}';
+
+/// A day without its year: `Nov 20`.
+String formatMonthDay(DateTime day) =>
+    '${_monthNames[day.month - 1].substring(0, 3)} ${day.day}';
 
 /// Reads a typed date, or null if it isn't one. Understands `today`,
 /// `tomorrow`, `11/20`, `11/20/26`, `11/20/2026`, `2026-11-20`, `Nov 20`,

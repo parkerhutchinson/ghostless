@@ -13,6 +13,7 @@ import '../tasks/due_date.dart';
 import '../tasks/project_labels.dart' show maxLabelLength;
 import '../tasks/task.dart';
 import '../tasks/task_repository.dart';
+import '../reminders/reminders.dart' show canSetReminder;
 import 'mcp_files.dart';
 import 'task_change_feed.dart';
 import '../tasks/image_compression.dart';
@@ -99,7 +100,8 @@ final class McpTools {
       description:
           'Lists the projects (boards), in sidebar order: id, name, whether '
           'it is the personal project, whether the person using the app '
-          'starred it (favorite), its description (Markdown), its columns '
+          'starred it (favorite), its status (onTrack, atRisk, offTrack, '
+          'onHold, or null for none), its description (Markdown), its columns '
           '(left to right) and how many tasks it has.',
       inputSchema: _object({}),
       readOnly: true,
@@ -147,7 +149,7 @@ final class McpTools {
       name: 'update_project',
       title: 'Update project',
       description:
-          'Renames a shared project or changes its description. Only the '
+          'Renames a shared project or changes its description or status. Only the '
           'fields given change. The personal project can\'t be edited. '
           'Returns it.',
       inputSchema: _object(
@@ -158,6 +160,13 @@ final class McpTools {
             'New description, in Markdown ($_markdownSubset). An empty '
             'string clears it.',
           ),
+          'status': {
+            'type': ['string', 'null'],
+            'enum': [...ProjectStatus.values.map((s) => s.name), null],
+            'description':
+                'How the project is going: onTrack, atRisk, offTrack or '
+                'onHold. null clears it.',
+          },
         },
         required: ['project'],
       ),
@@ -177,10 +186,21 @@ final class McpTools {
             throw McpToolError('There\'s already a project "$name".');
           }
         }
-        final updated = project.copyWith(
+        var updated = project.copyWith(
           name: name,
           description: _optionalString(args, 'description')?.trim(),
         );
+        if (args.containsKey('status')) {
+          final value = args['status'];
+          final status = ProjectStatus.from(value);
+          if (value != null && status == null) {
+            throw McpToolError(
+              'Unknown status "$value": use onTrack, atRisk, offTrack or '
+              'onHold, or null to clear it.',
+            );
+          }
+          updated = updated.copyWith(status: status);
+        }
         projects.save(updated);
         return _projectJson(updated);
       },
@@ -370,6 +390,10 @@ final class McpTools {
               final String a => _person(a),
               _ => null,
             };
+        if (reminder != null &&
+            !canSetReminder(assigneeId: assignee, me: profiles.current?.id)) {
+          throw const McpToolError(_reminderNotMine);
+        }
         Map<String, Object?> create({
           List<String> images = const [],
           List<Attachment> attachments = const [],
@@ -776,11 +800,14 @@ final class McpTools {
       task = task.copyWith(description: d.trim());
     }
     if (args.containsKey('assignee') && !_isPersonal(task)) {
+      final assignee = switch (args['assignee']) {
+        final String a => _person(a),
+        _ => null,
+      };
       task = task.copyWith(
-        assigneeId: switch (args['assignee']) {
-          final String a => _person(a),
-          _ => null,
-        },
+        assigneeId: assignee,
+        // A reminder is the assignee's own: someone new starts without.
+        reminder: assignee == task.assigneeId ? task.reminder : null,
       );
     }
     if (args.containsKey('dueDate')) {
@@ -800,6 +827,13 @@ final class McpTools {
       final reminder = _reminderArg(args['reminder']);
       if (reminder != null && task.dueDate == null) {
         throw const McpToolError('Set a dueDate to have a reminder.');
+      }
+      if (reminder != null &&
+          !canSetReminder(
+            assigneeId: task.assigneeId,
+            me: profiles.current?.id,
+          )) {
+        throw const McpToolError(_reminderNotMine);
       }
       task = task.copyWith(reminder: reminder);
     }
@@ -950,6 +984,7 @@ final class McpTools {
     'name': p.name,
     'personal': p.isPersonal,
     'favorite': profiles.current?.isFavorite(p.id) ?? false,
+    'status': p.status?.name,
     'description': p.description,
     'columns': [
       for (final c in p.columns) {'id': c.id, 'name': c.title},
@@ -983,7 +1018,8 @@ final class McpTools {
         'Remind the assignee (a macOS notification) this many minutes '
         'before it\'s due: 0 at the due time, 60 an hour before, 1440 a '
         'day before. A task due any time that day counts as due at 9 AM. '
-        'Needs dueDate; null for no reminder.',
+        'Needs dueDate and the task assigned to you (the current '
+        'person); null for no reminder.',
   };
 
   /// A reminder in minutes before, or null for none.
@@ -1146,3 +1182,7 @@ const _markdownSubset =
     '**bold**, *italic*, ~~struck~~, [text](url), "- " and "1. " list '
     'items, "# " to "### " headings, a blank line between paragraphs; '
     'nothing else';
+
+const _reminderNotMine =
+    'Only a task assigned to you can have a reminder (it goes to the '
+    'assignee). Assign it to yourself first.';

@@ -242,23 +242,33 @@ final class PostgresConfig extends SqlConfig {
   @override
   RemoteKind get kind => RemoteKind.postgres;
 
+  /// Where the database is, as the driver wants it.
+  pg.Endpoint get endpoint => pg.Endpoint(
+    host: host.trim(),
+    port: port,
+    database: database.trim(),
+    username: username.trim(),
+    password: password,
+  );
+
+  pg.ConnectionSettings get connectionSettings => pg.ConnectionSettings(
+    sslMode: ssl ? pg.SslMode.require : pg.SslMode.disable,
+    connectTimeout: const Duration(seconds: 15),
+    // A query on a connection that died silently (the network dropped
+    // mid-sync) fails after this instead of hanging for the default 5
+    // minutes, with the sync stuck at "Syncing…" meanwhile.
+    queryTimeout: const Duration(seconds: 60),
+  );
+
+  /// A connection of its own (not the sync's), for one-off questions such
+  /// as the Developer view's sizes. Close it when done.
+  Future<pg.Connection> open() =>
+      pg.Connection.open(endpoint, settings: connectionSettings);
+
   @override
   SyncAdapter build({Set<String> softDeletes = const {}}) => PostgresAdapter(
-    endpoint: pg.Endpoint(
-      host: host.trim(),
-      port: port,
-      database: database.trim(),
-      username: username.trim(),
-      password: password,
-    ),
-    settings: pg.ConnectionSettings(
-      sslMode: ssl ? pg.SslMode.require : pg.SslMode.disable,
-      connectTimeout: const Duration(seconds: 15),
-      // A query on a connection that died silently (the network dropped
-      // mid-sync) fails after this instead of hanging for the default 5
-      // minutes, with the sync stuck at "Syncing…" meanwhile.
-      queryTimeout: const Duration(seconds: 60),
-    ),
+    endpoint: endpoint,
+    settings: connectionSettings,
     tables: tables(softDeletes),
   );
 

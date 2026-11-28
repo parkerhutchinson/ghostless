@@ -6,6 +6,7 @@ import 'package:codename/sync/compatibility.dart';
 import 'package:codename/sync/remote_config.dart';
 import 'package:codename/sync/sync_service.dart';
 import 'package:codename/comments/comment.dart';
+import 'package:codename/status/status_update.dart';
 import 'package:codename/tasks/task.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_engine/sync_engine.dart';
@@ -95,6 +96,14 @@ void main() {
         taskId: 't',
         authorId: 'me',
         body: 'Looks **good**',
+        createdAt: at,
+      ).toJson(),
+      'status_updates': StatusUpdate(
+        id: 'u',
+        projectId: 'p',
+        authorId: 'me',
+        status: ProjectStatus.atRisk,
+        body: 'Slipping',
         createdAt: at,
       ).toJson(),
     };
